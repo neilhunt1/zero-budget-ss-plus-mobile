@@ -1,0 +1,11 @@
+node_modules/
+dist/
+
+# Environment files with secrets
+.env.development
+.env.production
+
+# Service account keys — never commit
+service-account-*.json
+*-service-account.json
+*.key.json

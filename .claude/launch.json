@@ -1,0 +1,15 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Setup Sheet (dev)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "setup:dev"]
+    },
+    {
+      "name": "Setup Sheet (prod)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "setup:prod"]
+    }
+  ]
+}
