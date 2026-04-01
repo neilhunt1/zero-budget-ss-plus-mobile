@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "groups": [
+    {
+      "name": "Monthly Expenses",
+      "sort_order": 1,
+      "categories": [
+        { "name": "Groceries 🛒", "type": "fluid", "template": 1000, "sort_order": 1 },
+        { "name": "Dining Out 🧑‍🍳", "type": "fluid", "template": 365, "sort_order": 2 },
+        { "name": "Transportation ⛽️", "type": "fluid", "template": 175, "sort_order": 3 },
+        { "name": "Kori Spending 💸", "type": "fluid", "template": 1500, "sort_order": 4 }
+      ]
+    },
+    {
+      "name": "Kids Activities",
+      "sort_order": 2,
+      "subgroups": [
+        {
+          "name": "Emory Activities",
+          "sort_order": 1,
+          "categories": [
+            { "name": "Emory Hockey 🏒", "type": "fluid", "template": 800, "sort_order": 1 },
+            { "name": "Emory Baseball ⚾", "type": "fluid", "template": 150, "sort_order": 2 },
+            { "name": "Emory Percussion 🥁", "type": "fluid", "template": 100, "sort_order": 3 }
+          ]
+        },
+        {
+          "name": "Amara Activities",
+          "sort_order": 2,
+          "categories": [
+            { "name": "Amara Skating ⛸️", "type": "fluid", "template": 750, "sort_order": 1 },
+            { "name": "Amara Gymnastics 🤸", "type": "fluid", "template": 667, "sort_order": 2 },
+            { "name": "Amara Kumon", "type": "fluid", "template": 0, "sort_order": 3 }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Home",
+      "sort_order": 3,
+      "categories": [
+        { "name": "Escrow 🏚️", "type": "fixed_bill", "template": 46823, "sort_order": 1 },
+        { "name": "Electric ⚡️", "type": "fixed_bill", "template": 140, "sort_order": 2 },
+        { "name": "Home Repair 🧑‍🔧", "type": "savings_target", "template": 125, "sort_order": 3 }
+      ]
+    }
+  ]
+}
