@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
 import AuthGate from './components/AuthGate';
 import NavBar from './components/NavBar';
@@ -10,7 +10,7 @@ export default function App() {
   const { isAuthenticated } = useAuth();
 
   return (
-    <BrowserRouter>
+    <HashRouter>
       <div className="app">
         <main className="main-content">
           <Routes>
@@ -43,6 +43,6 @@ export default function App() {
         </main>
         {isAuthenticated && <NavBar />}
       </div>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
