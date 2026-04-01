@@ -126,7 +126,7 @@ const HEADER_BG_COLOR = { red: 0.29, green: 0.525, blue: 0.91 };
 const HEADER_FG_COLOR = { red: 1, green: 1, blue: 1 };
 
 // Sheet schema version — increment when structure changes
-const SHEET_VERSION = 1;
+const SHEET_VERSION = 2;
 
 // ─── Environment Loading ───────────────────────────────────────────────────────
 
