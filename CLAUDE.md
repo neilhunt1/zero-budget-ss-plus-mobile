@@ -45,7 +45,8 @@ Prerequisites (one-time):
 | `Budget` | Categories + monthly assigned amounts |
 | `Templates` | Recurring split templates |
 | `Reflect` | Charts and summary pivots |
-| `BankToSheets_Raw` | Written by BankToSheets integration — do not edit |
+| `Transactions (BTS)` | Written by BankToSheets integration — do not edit |
+| `Balance History (BTS)` | Written by BankToSheets integration — do not edit |
 | `YNAB_Import` | One-time historical import — hidden |
 
 ## Key Design Decisions

@@ -116,7 +116,8 @@ const TABS_IN_ORDER = [
   "Budget",
   "Templates",
   "Reflect",
-  "BankToSheets_Raw",
+  "Transactions (BTS)",
+  "Balance History (BTS)",
   "YNAB_Import",
 ];
 
@@ -129,7 +130,11 @@ const SHEET_VERSION = 1;
 
 // ─── Environment Loading ───────────────────────────────────────────────────────
 
-function loadEnv(): { sheetId: string; keyPath: string } {
+type AuthConfig =
+  | { kind: "keyFile"; keyPath: string }
+  | { kind: "credentials"; credentials: object };
+
+function loadEnv(): { sheetId: string; authConfig: AuthConfig } {
   const args = process.argv.slice(2);
   const envFlag = args.find((a) => a.startsWith("--env=") || a === "--env");
   let envName: string;
@@ -151,44 +156,63 @@ function loadEnv(): { sheetId: string; keyPath: string } {
     envName === "dev" ? ".env.development" : ".env.production";
   const envPath = path.resolve(process.cwd(), envFile);
 
-  if (!fs.existsSync(envPath)) {
-    bail(
-      `Missing ${envFile}. Copy .env.example to ${envFile} and fill in values.`
-    );
-  }
-
-  // Manual dotenv parse — avoids requiring dotenv at top level for type safety
-  const lines = fs.readFileSync(envPath, "utf-8").split("\n");
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq === -1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    const val = trimmed.slice(eq + 1).trim();
-    if (!process.env[key]) process.env[key] = val;
+  // Load .env file if present — env vars already in the environment take precedence
+  if (fs.existsSync(envPath)) {
+    const lines = fs.readFileSync(envPath, "utf-8").split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq === -1) continue;
+      const key = trimmed.slice(0, eq).trim();
+      const val = trimmed.slice(eq + 1).trim();
+      if (!process.env[key]) process.env[key] = val;
+    }
+    log(`Loaded env from ${envFile}`);
+  } else {
+    log(`No ${envFile} found — using environment variables`);
   }
 
   const sheetId = process.env.GOOGLE_SHEET_ID;
-  const keyPath = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH;
-
   if (!sheetId || sheetId === "your_sheet_id_here") {
-    bail(`GOOGLE_SHEET_ID is not set in ${envFile}.`);
-  }
-  if (!keyPath) {
-    bail(`GOOGLE_SERVICE_ACCOUNT_KEY_PATH is not set in ${envFile}.`);
+    bail(`GOOGLE_SHEET_ID is not set. Add it to ${envFile} or set it as an environment variable.`);
   }
 
-  const resolvedKeyPath = path.resolve(process.cwd(), keyPath);
-  if (!fs.existsSync(resolvedKeyPath)) {
+  // Auth: prefer inline JSON key (cloud-friendly), fall back to key file path (local)
+  const inlineKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  const keyFilePath = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH;
+
+  let authConfig: AuthConfig;
+
+  if (inlineKey) {
+    let credentials: object;
+    try {
+      credentials = JSON.parse(inlineKey);
+    } catch {
+      bail(`GOOGLE_SERVICE_ACCOUNT_KEY is set but is not valid JSON.`);
+    }
+    log(`Auth: using inline service account key (GOOGLE_SERVICE_ACCOUNT_KEY)`);
+    authConfig = { kind: "credentials", credentials };
+  } else if (keyFilePath) {
+    const resolvedKeyPath = path.resolve(process.cwd(), keyFilePath);
+    if (!fs.existsSync(resolvedKeyPath)) {
+      bail(
+        `Service account key file not found: ${resolvedKeyPath}\n` +
+          `Download it from Google Cloud Console → IAM → Service Accounts → Keys.`
+      );
+    }
+    log(`Auth: using key file (GOOGLE_SERVICE_ACCOUNT_KEY_PATH)`);
+    authConfig = { kind: "keyFile", keyPath: resolvedKeyPath };
+  } else {
     bail(
-      `Service account key file not found: ${resolvedKeyPath}\n` +
-        `Download it from Google Cloud Console → IAM → Service Accounts → Keys.`
+      `No credentials found. Set either:\n` +
+        `  GOOGLE_SERVICE_ACCOUNT_KEY    — JSON key contents (recommended for cloud)\n` +
+        `  GOOGLE_SERVICE_ACCOUNT_KEY_PATH — path to JSON key file (local)`
     );
   }
 
-  log(`Loaded env from ${envFile} (sheet: ${sheetId})`);
-  return { sheetId, keyPath: resolvedKeyPath };
+  log(`Sheet ID: ${sheetId}`);
+  return { sheetId, authConfig };
 }
 
 // ─── Categories Validation ────────────────────────────────────────────────────
@@ -631,14 +655,23 @@ async function seedBudgetCategories(
   log(`Budget seed: added ${toAdd.length} categories (${existingRows.length} already existed)`);
 }
 
-// ─── Step: Lock BankToSheets_Raw ──────────────────────────────────────────────
+// ─── Step: Lock BankToSheets-managed tabs ─────────────────────────────────────
 
 async function lockBankToSheetsRaw(
   sheets: sheets_v4.Sheets,
   sheetId: string,
   sheetMeta: sheets_v4.Schema$Sheet[]
 ): Promise<void> {
-  const meta = findSheet(sheetMeta, "BankToSheets_Raw");
+  await lockTab(sheets, sheetId, sheetMeta, "Transactions (BTS)");
+}
+
+async function lockTab(
+  sheets: sheets_v4.Sheets,
+  sheetId: string,
+  sheetMeta: sheets_v4.Schema$Sheet[],
+  tabTitle: string
+): Promise<void> {
+  const meta = findSheet(sheetMeta, tabTitle);
   if (!meta) return;
 
   const tabSheetId = meta.properties?.sheetId!;
@@ -658,7 +691,7 @@ async function lockBankToSheetsRaw(
   );
 
   if (alreadyLocked) {
-    log("Lock: BankToSheets_Raw already protected, skipping");
+    log(`Lock: "${tabTitle}" already protected, skipping`);
     return;
   }
 
@@ -679,7 +712,7 @@ async function lockBankToSheetsRaw(
     },
   });
 
-  log("Lock: BankToSheets_Raw tab protected (warn on edit)");
+  log(`Lock: "${tabTitle}" tab protected (warn on edit)`);
 }
 
 // ─── Step: Hide YNAB_Import ───────────────────────────────────────────────────
@@ -762,7 +795,7 @@ async function main(): Promise<void> {
   console.log("\n── Zero Budget Sheet Setup ─────────────────────────────────\n");
 
   // 1. Load environment
-  const { sheetId, keyPath } = loadEnv();
+  const { sheetId, authConfig } = loadEnv();
 
   // 2. Validate categories
   const categoriesConfig = loadAndValidateCategories();
@@ -770,7 +803,9 @@ async function main(): Promise<void> {
 
   // 3. Authenticate
   const auth = new google.auth.GoogleAuth({
-    keyFile: keyPath,
+    ...(authConfig.kind === "keyFile"
+      ? { keyFile: authConfig.keyPath }
+      : { credentials: authConfig.credentials }),
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
 
@@ -796,8 +831,9 @@ async function main(): Promise<void> {
   // 9. Seed Budget tab with categories
   await seedBudgetCategories(sheets, sheetId, flatCategories);
 
-  // 10. Lock BankToSheets_Raw
+  // 10. Lock BankToSheets-managed tabs
   await lockBankToSheetsRaw(sheets, sheetId, sheetMeta);
+  await lockTab(sheets, sheetId, sheetMeta, "Balance History (BTS)");
 
   // 11. Hide YNAB_Import
   await hideYnabImport(sheets, sheetId, sheetMeta);
