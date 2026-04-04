@@ -5,6 +5,7 @@
   "required": ["version", "groups"],
   "additionalProperties": false,
   "properties": {
+    "$schema": { "type": "string" },
     "version": {
       "type": "integer",
       "description": "Schema version — increment when structure changes"
@@ -66,8 +67,8 @@
           },
           "type": {
             "type": "string",
-            "enum": ["fluid", "fixed_bill", "savings_target"],
-            "description": "fluid=moveable spending, fixed_bill=non-negotiable, savings_target=committed"
+            "enum": ["fluid", "fixed_bill", "savings_target", "targeted_amount"],
+            "description": "fluid=freely moveable monthly spending | fixed_bill=committed bill/obligation (any frequency/amount) | savings_target=accruing envelope for irregular spend | targeted_amount=like savings_target but with an explicit goal amount/timeline (phase 1: behaves identically to savings_target)"
           },
           "template": {
             "type": "number",

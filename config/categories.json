@@ -1,47 +1,268 @@
 {
+  "$schema": "./categories.schema.json",
   "version": 1,
   "groups": [
     {
-      "name": "Monthly Expenses",
+      "name": "Food & Dining",
       "sort_order": 1,
       "categories": [
-        { "name": "Groceries 🛒", "type": "fluid", "template": 1000, "sort_order": 1 },
-        { "name": "Dining Out 🧑‍🍳", "type": "fluid", "template": 365, "sort_order": 2 },
-        { "name": "Transportation ⛽️", "type": "fluid", "template": 175, "sort_order": 3 },
-        { "name": "Kori Spending 💸", "type": "fluid", "template": 1500, "sort_order": 4 }
+        { "name": "Groceries 🛒",             "type": "fluid",          "template": 1000 },
+        { "name": "Dining Out 🧑‍🍳",            "type": "fluid",          "template": 365  },
+        { "name": "Kori work dining out 🌮",  "type": "fluid",          "template": 115  },
+        { "name": "kids 🏫 Lunch",            "type": "fixed_bill",     "template": 115  },
+        { "name": "CSA 👩‍🌾",                   "type": "savings_target", "template": 25   }
       ]
     },
     {
-      "name": "Kids Activities",
+      "name": "Kids & School",
       "sort_order": 2,
       "subgroups": [
         {
-          "name": "Emory Activities",
+          "name": "Amara Activities",
           "sort_order": 1,
           "categories": [
-            { "name": "Emory Hockey 🏒", "type": "fluid", "template": 800, "sort_order": 1 },
-            { "name": "Emory Baseball ⚾", "type": "fluid", "template": 150, "sort_order": 2 },
-            { "name": "Emory Percussion 🥁", "type": "fluid", "template": 100, "sort_order": 3 }
+            { "name": "Gymnastics 🤸",        "type": "savings_target", "template": 600 },
+            { "name": "Amara skating ⛸️",     "type": "savings_target", "template": 750 },
+            { "name": "Amara Kumon",          "type": "fixed_bill",     "template": 0   },
+            { "name": "Amara Summer Care ⛺️", "type": "savings_target", "template": 200 },
+            { "name": "Amara other",          "type": "savings_target", "template": 200 }
           ]
         },
         {
-          "name": "Amara Activities",
+          "name": "Emory Activities",
           "sort_order": 2,
           "categories": [
-            { "name": "Amara Skating ⛸️", "type": "fluid", "template": 750, "sort_order": 1 },
-            { "name": "Amara Gymnastics 🤸", "type": "fluid", "template": 667, "sort_order": 2 },
-            { "name": "Amara Kumon", "type": "fluid", "template": 0, "sort_order": 3 }
+            { "name": "Emory hockey 🏒",      "type": "savings_target", "template": 800 },
+            { "name": "Emory Summer Care ⛺️", "type": "savings_target", "template": 250 },
+            { "name": "Emory other",          "type": "savings_target", "template": 300 }
+          ]
+        },
+        {
+          "name": "Clothing",
+          "sort_order": 3,
+          "categories": [
+            { "name": "Kids Clothing 👕",     "type": "savings_target", "template": 80  }
+          ]
+        },
+        {
+          "name": "School",
+          "sort_order": 4,
+          "categories": [
+            { "name": "School Supplies ✏️",     "type": "savings_target", "template": 25 },
+            { "name": "School fundraisers 👩‍🏫", "type": "savings_target", "template": 30 }
+          ]
+        },
+        {
+          "name": "Other",
+          "sort_order": 5,
+          "categories": [
+            { "name": "Melda Extracurricular", "type": "savings_target", "template": 100 },
+            { "name": "Adult extracurricular", "type": "fluid",          "template": 50  }
           ]
         }
       ]
     },
     {
-      "name": "Home",
+      "name": "Family Fun",
       "sort_order": 3,
       "categories": [
-        { "name": "Escrow 🏚️", "type": "fixed_bill", "template": 46823, "sort_order": 1 },
-        { "name": "Electric ⚡️", "type": "fixed_bill", "template": 140, "sort_order": 2 },
-        { "name": "Home Repair 🧑‍🔧", "type": "savings_target", "template": 125, "sort_order": 3 }
+        { "name": "Family Joint",      "type": "fluid",          "template": 900 },
+        { "name": "Family Sports 🏂",  "type": "fluid",          "template": 0   },
+        { "name": "Family Theatre 🎭", "type": "savings_target", "template": 0   },
+        { "name": "Family Kori",       "type": "fluid",          "template": 0   }
+      ]
+    },
+    {
+      "name": "Home",
+      "sort_order": 4,
+      "categories": [
+        { "name": "Escrow🏚️",             "type": "fixed_bill",     "template": 1100 },
+        { "name": "HOA 🏡",               "type": "fixed_bill",     "template": 110  },
+        { "name": "Personal Home Escrow", "type": "fixed_bill",     "template": 0    },
+        { "name": "Electric ⚡️",          "type": "savings_target", "template": 140  },
+        { "name": "Water 💧",             "type": "savings_target", "template": 60   },
+        { "name": "Storm Water",          "type": "savings_target", "template": 79   },
+        { "name": "Home Cleaners 🧹",     "type": "savings_target", "template": 380  },
+        { "name": "Home Repair 🧑‍🔧",      "type": "savings_target", "template": 125  },
+        { "name": "Home Improvement 🖼️",  "type": "savings_target", "template": 0    },
+        { "name": "Lawn Care",            "type": "savings_target", "template": 0    }
+      ]
+    },
+    {
+      "name": "Transportation",
+      "sort_order": 5,
+      "categories": [
+        { "name": "Transportation ⛽️",  "type": "fluid",          "template": 175 },
+        { "name": "Auto 🚘",            "type": "savings_target", "template": 500 },
+        { "name": "Auto Insurance",     "type": "fixed_bill",     "template": 150 },
+        { "name": "Umbrella Policy",    "type": "fixed_bill",     "template": 22  }
+      ]
+    },
+    {
+      "name": "Health & Wellness",
+      "sort_order": 6,
+      "subgroups": [
+        {
+          "name": "Insurance",
+          "sort_order": 1,
+          "categories": [
+            { "name": "Life Insurance - Neil",          "type": "fixed_bill", "template": 80 },
+            { "name": "Life Insurance - Kori",          "type": "fixed_bill", "template": 13 },
+            { "name": "Long Term Disability Insurance", "type": "fixed_bill", "template": 13 }
+          ]
+        },
+        {
+          "name": "Medical",
+          "sort_order": 2,
+          "categories": [
+            { "name": "Medical 🩺", "type": "savings_target", "template": 175 }
+          ]
+        },
+        {
+          "name": "Fitness",
+          "sort_order": 3,
+          "categories": [
+            { "name": "Fitness 🏋️",  "type": "savings_target", "template": 75  },
+            { "name": "Korin Fitness","type": "savings_target", "template": 100 }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Technology & Subscriptions",
+      "sort_order": 7,
+      "categories": [
+        { "name": "Family phone plan 📲",      "type": "savings_target", "template": 145 },
+        { "name": "Subscriptions 🎞️",         "type": "fluid",          "template": 200 },
+        { "name": "Technology replacement 🧑‍💻","type": "savings_target", "template": 125 }
+      ]
+    },
+    {
+      "name": "Personal & Discretionary",
+      "sort_order": 8,
+      "categories": [
+        { "name": "Kori Spending 💸",            "type": "fixed_bill",          "template": 500 },
+        { "name": "Date Nights 👩‍❤️‍👨",            "type": "savings_target", "template": 70  },
+        { "name": "Haircuts 💈",                 "type": "savings_target", "template": 45  },
+        { "name": "Stuff I Forgot to Budget For","type": "fluid",          "template": 200 }
+      ]
+    },
+    {
+      "name": "Pets",
+      "sort_order": 9,
+      "categories": [
+        { "name": "Pets 🦮", "type": "savings_target", "template": 250 }
+      ]
+    },
+    {
+      "name": "Savings & Variable Stuff",
+      "sort_order": 10,
+      "categories": [
+        { "name": "Emergency Fund",                 "type": "savings_target", "template": 2000 },
+        { "name": "529 Plan",                       "type": "savings_target", "template": 200  },
+        { "name": "IRA contribution, retirement",   "type": "savings_target", "template": 0    },
+        { "name": "EVEN tax year",                  "type": "savings_target", "template": 0    },
+        { "name": "ODD Tax Reserves🪙",             "type": "savings_target", "template": 0    },
+        { "name": "26 week paycheck savings",       "type": "savings_target", "template": 0    },
+        { "name": "Passport renewals 🛂",           "type": "savings_target", "template": 7    },
+        { "name": "Hunt contribution money",        "type": "savings_target", "template": 0    },
+        { "name": "Sharp Help",                     "type": "savings_target", "template": 0    },
+        { "name": "Political contributions",        "type": "fluid",          "template": 0    },
+        { "name": "To be reimbursed",               "type": "fluid",          "template": 0    },
+        { "name": "Uncategorized Special Allocation","type": "fluid",         "template": 0    }
+      ]
+    },
+    {
+      "name": "Charitable Giving",
+      "sort_order": 11,
+      "categories": [
+        { "name": "Cash Charitable Giving 🎗️", "type": "savings_target", "template": 1100 },
+        { "name": "Non-Cash Charitable Giving", "type": "savings_target", "template": 0    }
+      ]
+    },
+    {
+      "name": "Gifts & Holidays🎁",
+      "sort_order": 12,
+      "subgroups": [
+        {
+          "name": "Christmas",
+          "sort_order": 1,
+          "categories": [
+            { "name": "Christmas Kids Gifts",        "type": "savings_target", "template": 100 },
+            { "name": "Christmas Third Party Gifts", "type": "savings_target", "template": 100 },
+            { "name": "Christmas party",             "type": "savings_target", "template": 0   },
+            { "name": "Christmas cards",             "type": "savings_target", "template": 0   },
+            { "name": "Christmas Other",             "type": "savings_target", "template": 0   }
+          ]
+        },
+        {
+          "name": "Other Holidays & Gifts",
+          "sort_order": 2,
+          "categories": [
+            { "name": "Halloween",            "type": "savings_target", "template": 10 },
+            { "name": "Easter",               "type": "savings_target", "template": 12 },
+            { "name": "Amara Birthday party", "type": "savings_target", "template": 50 },
+            { "name": "Emory birthday party", "type": "savings_target", "template": 50 },
+            { "name": "Teacher gifts 👩‍🏫",   "type": "savings_target", "template": 28 },
+            { "name": "Birthday/Other gifts", "type": "savings_target", "template": 20 },
+            { "name": "GoFundMe stuff",       "type": "fluid",          "template": 0  },
+            { "name": "Non-deductible giving",      "type": "savings_target", "template": 0    }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Vacations & Travel",
+      "sort_order": 13,
+      "categories": [
+        { "name": "Disney Vacations",          "type": "savings_target", "template": 0   },
+        { "name": "Canada 2026",               "type": "savings_target", "template": 0   },
+        { "name": "Spring Break South Florida","type": "savings_target", "template": 0   },
+        { "name": "Hershey Park",              "type": "savings_target", "template": 0   },
+        { "name": "Carbon Offsets",            "type": "savings_target", "template": 0   },
+        { "name": "Family-Friends Travel 👪",  "type": "savings_target", "template": 350 }
+      ]
+    },
+    {
+      "name": "Neil's Personal",
+      "sort_order": 14,
+      "categories": [
+        { "name": "Neil Spending", "type": "fluid", "template": 500 },
+        { "name": "Other Theatre",   "type": "fluid", "template": 0   },
+        { "name": "Neil Clothing",   "type": "fluid", "template": 0   },
+        { "name": "Alcohol🍷",   "type": "fluid", "template": 0   },
+        { "name": "MLB.TV 📺",   "type": "fluid", "template": 0   },
+        { "name": "Arena+Signature+Kennedy",   "type": "fluid", "template": 0   },
+        { "name": "Broadway 🗽",   "type": "fluid", "template": 0   },
+        { "name": "Neil charity 🎗️",   "type": "fluid", "template": 0   },
+        { "name": "Neil gift giving 💐",   "type": "fluid", "template": 0   },
+        { "name": "Neil's Savings 💰",   "type": "fluid", "template": 0   }
+      ]
+    },
+    {
+      "name": "Emory Money",
+      "sort_order": 15,
+      "categories": [
+        { "name": "Emory Spending 💸",          "type": "fluid",          "template": 20 },
+        { "name": "Emory Savings 💰",           "type": "savings_target", "template": 20 },
+        { "name": "Emory helping other people", "type": "fluid",          "template": 10 }
+      ]
+    },
+    {
+      "name": "Amara Money",
+      "sort_order": 16,
+      "categories": [
+        { "name": "Amara spending 💸",  "type": "fluid",          "template": 20 },
+        { "name": "Amara savings 💰",   "type": "savings_target", "template": 20 },
+        { "name": "Amara helping other","type": "fluid",          "template": 10 }
+      ]
+    },
+    {
+      "name": "Business Expenses",
+      "sort_order": 17,
+      "categories": [
+        { "name": "Kori work misc", "type": "fluid", "template": 15 },
+        { "name": "Neil work misc",  "type": "fluid", "template": 15 }
       ]
     }
   ]
