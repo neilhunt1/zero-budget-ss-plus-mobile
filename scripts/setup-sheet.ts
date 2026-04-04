@@ -612,29 +612,30 @@ async function applyConditionalFormatting(
 }
 
 // ─── Step: Seed Budget Categories ─────────────────────────────────────────────
+//
+// Strategy: clear rows 2–501 (category definition rows) and rewrite from
+// categories.json on every run. This is safe because:
+//   - Rows 2–501 are pure config — no financial data lives here.
+//   - Monthly assignment data lives at row 502+, referenced by category name
+//     string — completely untouched by this operation.
+// This ensures categories.json is the true single source of truth: no
+// accumulated test data, no stale rows, no drift from type/group changes.
 
 async function seedBudgetCategories(
   sheets: sheets_v4.Sheets,
   sheetId: string,
   categories: FlatCategory[]
 ): Promise<void> {
-  // Read existing category rows (skip header row 1)
-  const existing = await sheets.spreadsheets.values.get({
+  // Clear existing category rows (rows 2–501), leaving header row 1 intact
+  // and the monthly assignments section (502+) completely untouched.
+  await sheets.spreadsheets.values.clear({
     spreadsheetId: sheetId,
-    range: "Budget!A2:G500",
+    range: "Budget!A2:G501",
   });
+  log(`Budget seed: cleared category rows 2–501`);
 
-  const existingRows = existing.data.values ?? [];
-  const existingNames = new Set(existingRows.map((r) => r[2] as string).filter(Boolean));
-
-  const toAdd = categories.filter((c) => !existingNames.has(c.category));
-
-  if (toAdd.length === 0) {
-    log(`Budget seed: all ${categories.length} categories already present, skipping`);
-    return;
-  }
-
-  const newRows = toAdd.map((c) => [
+  // Write all categories from JSON in sort_order
+  const rows = categories.map((c) => [
     c.group,
     c.subgroup,
     c.category,
@@ -644,15 +645,76 @@ async function seedBudgetCategories(
     c.active ? "TRUE" : "FALSE",
   ]);
 
-  await sheets.spreadsheets.values.append({
+  await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId,
     range: "Budget!A2",
     valueInputOption: "RAW",
-    insertDataOption: "INSERT_ROWS",
-    requestBody: { values: newRows },
+    requestBody: { values: rows },
   });
 
-  log(`Budget seed: added ${toAdd.length} categories (${existingRows.length} already existed)`);
+  log(`Budget seed: wrote ${categories.length} categories from categories.json`);
+}
+
+// ─── Step: Lock Budget category rows ─────────────────────────────────────────
+//
+// Protect rows 2–501 of the Budget tab with a warning. The edit path for
+// categories is categories.json + re-run setup, not direct sheet editing.
+
+async function lockBudgetCategories(
+  sheets: sheets_v4.Sheets,
+  sheetId: string,
+  sheetMeta: sheets_v4.Schema$Sheet[]
+): Promise<void> {
+  const meta = findSheet(sheetMeta, "Budget");
+  if (!meta) return;
+
+  const tabSheetId = meta.properties?.sheetId!;
+
+  // Check if a protection already covers the category rows range
+  const spreadsheet = await sheets.spreadsheets.get({
+    spreadsheetId: sheetId,
+    fields: "sheets(protectedRanges)",
+  });
+
+  const allProtected = spreadsheet.data.sheets?.flatMap(
+    (s) => s.protectedRanges ?? []
+  ) ?? [];
+
+  // Row indices are 0-based: rows 2–501 → startRowIndex=1, endRowIndex=501
+  const alreadyLocked = allProtected.some(
+    (p) =>
+      p.range?.sheetId === tabSheetId &&
+      p.range?.startRowIndex === 1 &&
+      p.range?.endRowIndex === 501
+  );
+
+  if (alreadyLocked) {
+    log(`Lock: Budget category rows already protected, skipping`);
+    return;
+  }
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: sheetId,
+    requestBody: {
+      requests: [
+        {
+          addProtectedRange: {
+            protectedRange: {
+              range: {
+                sheetId: tabSheetId,
+                startRowIndex: 1,   // row 2 (0-based)
+                endRowIndex: 501,   // row 501 inclusive
+              },
+              description: "Managed by categories.json — edit there and re-run setup, not here",
+              warningOnly: true,
+            },
+          },
+        },
+      ],
+    },
+  });
+
+  log(`Lock: Budget category rows 2–501 protected (warn on edit)`);
 }
 
 // ─── Step: Lock BankToSheets-managed tabs ─────────────────────────────────────
@@ -828,10 +890,11 @@ async function main(): Promise<void> {
   // 8. Apply conditional formatting to Transactions
   await applyConditionalFormatting(sheets, sheetId, sheetMeta);
 
-  // 9. Seed Budget tab with categories
+  // 9. Seed Budget tab with categories (clear-then-rewrite for clean sync)
   await seedBudgetCategories(sheets, sheetId, flatCategories);
 
-  // 10. Lock BankToSheets-managed tabs
+  // 10. Lock Budget category rows + BankToSheets-managed tabs
+  await lockBudgetCategories(sheets, sheetId, sheetMeta);
   await lockBankToSheetsRaw(sheets, sheetId, sheetMeta);
   await lockTab(sheets, sheetId, sheetMeta, "Balance History (BTS)");
 
