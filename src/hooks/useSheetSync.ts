@@ -36,7 +36,7 @@ export function useSheetSync(token: string | null, intervalMs = 15_000): number 
     if (!token || !sheetId || disabledRef.current) return;
 
     async function checkForChanges() {
-      // Pause when tab is backgrounded — resume on next tick when visible again.
+      // Pause when tab is backgrounded — visibilitychange listener handles resume.
       if (document.hidden) return;
       if (disabledRef.current) return;
 
@@ -45,10 +45,15 @@ export function useSheetSync(token: string | null, intervalMs = 15_000): number 
           headers: { Authorization: `Bearer ${token}` },
         });
 
-        if (res.status === 403 || res.status === 401) {
-          // Drive scope not granted — disable polling silently.
+        if (res.status === 403) {
+          // Drive scope not granted — disable polling silently for this session.
           disabledRef.current = true;
           console.debug('[useSheetSync] Drive metadata scope not available; auto-refresh disabled.');
+          return;
+        }
+
+        if (res.status === 401) {
+          // Token expired — skip this tick, polling resumes when useAuth refreshes the token.
           return;
         }
 
@@ -73,9 +78,19 @@ export function useSheetSync(token: string | null, intervalMs = 15_000): number 
       }
     }
 
+    // Fire immediately when tab regains focus — avoids waiting up to intervalMs
+    // after switching back to the tab (Chrome throttles setInterval in background tabs).
+    const handleVisibilityChange = () => {
+      if (!document.hidden) checkForChanges();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     checkForChanges(); // run immediately on mount / token change
     const timerId = setInterval(checkForChanges, intervalMs);
-    return () => clearInterval(timerId);
+    return () => {
+      clearInterval(timerId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [token, sheetId, intervalMs]);
 
   return revision;
