@@ -7,7 +7,7 @@ A mobile-first zero-based budgeting app. Google Sheets is the backend; React is 
 - **Backend storage**: Google Sheets (API-managed)
 - **Sheet provisioning**: `scripts/setup-sheet.ts` (TypeScript, ts-node)
 - **Categories config**: `config/categories.json` (validated against `config/categories.schema.json`)
-- **Frontend**: React PWA (not yet built)
+- **Frontend**: React PWA (Vite + React 18 + TypeScript, deployed to GitHub Pages)
 - **Auth**: Google OAuth (app) + service account (scripts)
 
 ## Sheet Rules — Read Before Touching the Sheet
@@ -48,6 +48,23 @@ Prerequisites (one-time):
 | `Transactions (BTS)` | Written by BankToSheets integration — do not edit |
 | `Balance History (BTS)` | Written by BankToSheets integration — do not edit |
 | `YNAB_Import` | One-time historical import — hidden |
+
+## Backlog
+
+Tracked as GitHub Issues — run `gh issue list` to see current state.
+https://github.com/neilhunt1/zero-budget-ss-plus-mobile/issues
+
+Priority order:
+1. Complete categories.json (#3)
+2. Triage mode (#10) — core daily workflow
+3. Assign money in Plan (#4)
+4. Ready to Assign balance (#5)
+5. Apply monthly template (#6)
+6. Transaction list in Accounts (#9)
+7. Move Money (#7)
+8. Apps Script: normalize BankToSheets → Transactions (#18)
+9. Apps Script: auto-categorize by payee (#19)
+10. Remaining issues roughly in order
 
 ## Key Design Decisions
 
