@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { useSheetSync } from '../hooks/useSheetSync';
 import { SheetsClient } from '../api/client';
 import { fetchBudgetCategories, fetchMonthAssignments, buildGroupedBudget } from '../api/budget';
 import { fetchTransactions, computeCategoryActivity } from '../api/transactions';
@@ -22,6 +23,7 @@ function fmt(n: number): string {
 
 export default function Plan() {
   const { token } = useAuth();
+  const revision = useSheetSync(token);
   const [month, setMonth] = useState(() => toYYYYMM(new Date()));
   const [groups, setGroups] = useState<GroupedBudget[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,7 +48,7 @@ export default function Plan() {
     } finally {
       setLoading(false);
     }
-  }, [token, month]);
+  }, [token, month, revision]); // revision triggers re-fetch when sheet changes
 
   useEffect(() => { load(); }, [load]);
 
