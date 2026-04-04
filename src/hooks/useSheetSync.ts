@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 
+// `version` is a monotonically increasing integer that increments on every
+// server-side change to the file — much more responsive than `modifiedTime`,
+// which Google batches and can lag by minutes on Sheets edits.
 const DRIVE_FILE_URL = (fileId: string) =>
-  `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=modifiedTime`;
+  `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=version`;
 
 /**
  * Polls the Google Drive file metadata API every `intervalMs` milliseconds.
- * When the sheet's modifiedTime changes, the returned `revision` counter
+ * When the sheet's version number changes, the returned `revision` counter
  * increments — add it to a useCallback's dependency array to trigger a
  * data re-fetch automatically.
  *
@@ -51,18 +54,18 @@ export function useSheetSync(token: string | null, intervalMs = 15_000): number 
 
         if (!res.ok) return; // transient error — retry next tick
 
-        const data = (await res.json()) as { modifiedTime?: string };
-        const { modifiedTime } = data;
-        if (!modifiedTime) return;
+        const data = (await res.json()) as { version?: string };
+        const { version } = data;
+        if (!version) return;
 
         if (lastModifiedRef.current === null) {
           // First successful call — record baseline, don't bump revision.
-          lastModifiedRef.current = modifiedTime;
+          lastModifiedRef.current = version;
           return;
         }
 
-        if (modifiedTime !== lastModifiedRef.current) {
-          lastModifiedRef.current = modifiedTime;
+        if (version !== lastModifiedRef.current) {
+          lastModifiedRef.current = version;
           setRevision((r) => r + 1);
         }
       } catch {
