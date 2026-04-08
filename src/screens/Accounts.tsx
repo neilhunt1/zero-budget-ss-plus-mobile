@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { useSheetSync } from '../hooks/useSheetSync';
 import { SheetsClient } from '../api/client';
 import { fetchTransactions } from '../api/transactions';
 import { Transaction } from '../types';
@@ -45,6 +46,7 @@ function buildAccountSummaries(transactions: Transaction[]): AccountSummary[] {
 
 export default function Accounts() {
   const { token } = useAuth();
+  const revision = useSheetSync(token);
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +65,7 @@ export default function Accounts() {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, revision]); // revision triggers re-fetch when sheet changes
 
   useEffect(() => { load(); }, [load]);
 

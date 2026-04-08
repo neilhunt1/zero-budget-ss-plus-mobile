@@ -7,6 +7,13 @@ const EXPIRY_KEY = 'zb_token_expiry';
 /** Google Sheets OAuth scope required by this app. */
 const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
 
+/**
+ * Drive metadata scope — used by useSheetSync to poll modifiedTime for
+ * auto-refresh. Must be enabled in Google Cloud Console → OAuth consent screen.
+ * If the token lacks this scope the hook degrades gracefully (no auto-refresh).
+ */
+const DRIVE_METADATA_SCOPE = 'https://www.googleapis.com/auth/drive.metadata.readonly';
+
 function getStoredToken(): string | null {
   const token = localStorage.getItem(TOKEN_KEY);
   const expiry = localStorage.getItem(EXPIRY_KEY);
@@ -33,7 +40,7 @@ export function useAuth(): AuthState {
   const [token, setToken] = useState<string | null>(getStoredToken);
 
   const login = useGoogleLogin({
-    scope: SHEETS_SCOPE,
+    scope: `${SHEETS_SCOPE} ${DRIVE_METADATA_SCOPE}`,
     onSuccess: (response) => {
       const expiry = Date.now() + response.expires_in * 1000;
       localStorage.setItem(TOKEN_KEY, response.access_token);

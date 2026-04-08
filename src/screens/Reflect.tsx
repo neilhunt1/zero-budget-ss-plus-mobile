@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { useSheetSync } from '../hooks/useSheetSync';
 import { SheetsClient } from '../api/client';
 import { fetchTransactions, computeCategoryActivity } from '../api/transactions';
 import { fetchBudgetCategories, fetchMonthAssignments } from '../api/budget';
@@ -29,6 +30,7 @@ interface MonthSummary {
 
 export default function Reflect() {
   const { token } = useAuth();
+  const revision = useSheetSync(token);
   const [month, setMonth] = useState(() => toYYYYMM(new Date()));
   const [summary, setSummary] = useState<MonthSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,7 +67,7 @@ export default function Reflect() {
     } finally {
       setLoading(false);
     }
-  }, [token, month]);
+  }, [token, month, revision]); // revision triggers re-fetch when sheet changes
 
   useEffect(() => { load(); }, [load]);
 
