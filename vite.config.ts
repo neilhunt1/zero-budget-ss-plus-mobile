@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -8,5 +9,20 @@ export default defineConfig({
   base: process.env.VITE_BASE_PATH ?? '/',
   build: {
     outDir: 'dist/app',
+  },
+  test: {
+    environment: 'node',
+    include: ['tests/**/*.test.ts'],
+    // Emit JUnit XML so the GitHub Actions Test Reporter can annotate PRs.
+    reporters: ['default', 'junit'],
+    outputFile: { junit: 'test-results/junit.xml' },
+    coverage: {
+      provider: 'v8',
+      // text = stdout summary, html = local browsing, lcov = future tooling.
+      reporter: ['text', 'html', 'lcov'],
+      include: ['src/api/**', 'src/hooks/**'],
+      exclude: ['src/screens/**', 'src/components/**', 'src/main.tsx', 'src/App.tsx'],
+      reportsDirectory: 'test-results/coverage',
+    },
   },
 });
