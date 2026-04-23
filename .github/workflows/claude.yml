@@ -1,0 +1,28 @@
+name: Claude Code Action
+on:
+  issues:
+    types: [assigned, opened]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  claude-code:
+    if: |
+      (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'claude')) ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          # This uses your Pro subscription token instead of an API Key
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Required for Claude to interact with your repo
+          github_token: ${{ secrets.GITHUB_TOKEN }}
