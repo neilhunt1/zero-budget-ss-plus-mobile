@@ -13,6 +13,7 @@ import * as fs from "fs";
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { google, sheets_v4 } from "googleapis";
+import { handleRemovedCategory } from "./category-utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -613,29 +614,73 @@ async function applyConditionalFormatting(
 
 // ─── Step: Seed Budget Categories ─────────────────────────────────────────────
 //
-// Strategy: clear rows 2–501 (category definition rows) and rewrite from
-// categories.json on every run. This is safe because:
-//   - Rows 2–501 are pure config — no financial data lives here.
-//   - Monthly assignment data lives at row 502+, referenced by category name
-//     string — completely untouched by this operation.
-// This ensures categories.json is the true single source of truth: no
-// accumulated test data, no stale rows, no drift from type/group changes.
+// Strategy: clear rows 2–501 and rewrite from categories.json on every run.
+// Before clearing, we check for categories that existed in the sheet but were
+// removed from categories.json. If any are referenced by transactions they are
+// archived (active:false) rather than deleted — preserving historical data
+// integrity. Categories with no transaction references are removed cleanly.
 
 async function seedBudgetCategories(
   sheets: sheets_v4.Sheets,
   sheetId: string,
-  categories: FlatCategory[]
+  newCategories: FlatCategory[]
 ): Promise<void> {
-  // Clear existing category rows (rows 2–501), leaving header row 1 intact
-  // and the monthly assignments section (502+) completely untouched.
+  // ── 1. Read current Budget category rows to detect removals ──────────────────
+  const existingRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: "Budget!A2:G501",
+  });
+  const existingRows = existingRes.data.values ?? [];
+
+  // ── 2. Identify removed categories (in sheet now, absent from new JSON) ──────
+  const newNames = new Set(newCategories.map((c) => c.category));
+  const removedRows = existingRows.filter((r) => r[2] && !newNames.has(r[2]));
+
+  // ── 3. Count transaction references for each removed category ────────────────
+  //    Skip the Transactions read entirely if nothing was removed (common case).
+  const txCounts = new Map<string, number>();
+  if (removedRows.length > 0) {
+    // Read only the category column (K) — avoids pulling full transaction rows.
+    const txRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: "Transactions!K2:K",
+    });
+    for (const row of txRes.data.values ?? []) {
+      const name = row[0] as string | undefined;
+      if (name) txCounts.set(name, (txCounts.get(name) ?? 0) + 1);
+    }
+  }
+
+  // ── 4. Decide archive vs remove for each removed category ────────────────────
+  const toArchive: FlatCategory[] = [];
+  for (const row of removedRows) {
+    const name = row[2] as string;
+    const txCount = txCounts.get(name) ?? 0;
+    const { action, reason } = handleRemovedCategory(name, txCount);
+
+    if (action === "archive") {
+      toArchive.push({
+        group: row[0] ?? "",
+        subgroup: row[1] ?? "",
+        category: name,
+        type: row[3] ?? "fluid",
+        template: parseFloat(row[4]) || 0,
+        sort_order: parseInt(row[5]) || 9999,
+        active: false,
+      });
+      log(`Budget seed: ⚠  archived "${name}" — ${reason}`);
+    } else {
+      log(`Budget seed: removed "${name}" — ${reason}`);
+    }
+  }
+
+  // ── 5. Clear rows 2–501 and rewrite: active categories + archived ones ───────
   await sheets.spreadsheets.values.clear({
     spreadsheetId: sheetId,
     range: "Budget!A2:G501",
   });
-  log(`Budget seed: cleared category rows 2–501`);
 
-  // Write all categories from JSON in sort_order
-  const rows = categories.map((c) => [
+  const allRows = [...newCategories, ...toArchive].map((c) => [
     c.group,
     c.subgroup,
     c.category,
@@ -649,10 +694,17 @@ async function seedBudgetCategories(
     spreadsheetId: sheetId,
     range: "Budget!A2",
     valueInputOption: "RAW",
-    requestBody: { values: rows },
+    requestBody: { values: allRows },
   });
 
-  log(`Budget seed: wrote ${categories.length} categories from categories.json`);
+  const archivedCount = toArchive.length;
+  const removedCount = removedRows.length - archivedCount;
+  log(
+    `Budget seed: wrote ${newCategories.length} active` +
+    (archivedCount ? `, ${archivedCount} archived` : "") +
+    (removedCount ? `, ${removedCount} removed` : "") +
+    " categories"
+  );
 }
 
 // ─── Step: Lock Budget category rows ─────────────────────────────────────────
