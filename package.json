@@ -10,6 +10,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",
+    "validate:categories": "ts-node scripts/validate-categories.ts",
     "setup:dev": "ts-node scripts/setup-sheet.ts --env dev",
     "setup:prod": "ts-node scripts/setup-sheet.ts --env prod"
   },
