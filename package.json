@@ -12,7 +12,9 @@
     "test:ui": "vitest --ui",
     "validate:categories": "ts-node scripts/validate-categories.ts",
     "setup:dev": "ts-node scripts/setup-sheet.ts --env dev",
-    "setup:prod": "ts-node scripts/setup-sheet.ts --env prod"
+    "setup:prod": "ts-node scripts/setup-sheet.ts --env prod",
+    "sync-from-ynab:dev": "ts-node scripts/sync-from-ynab.ts --env dev",
+    "sync-from-ynab:prod": "ts-node scripts/sync-from-ynab.ts --env prod"
   },
   "dependencies": {
     "@react-oauth/google": "^0.12.1",

@@ -52,6 +52,7 @@ export interface BudgetAssignment {
   month: string; // YYYY-MM
   category: string;
   assigned: number;
+  source: string; // 'manual' | 'ynab_import' | 'template'
   _rowIndex: number;
 }
 
