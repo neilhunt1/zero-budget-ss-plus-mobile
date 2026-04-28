@@ -220,7 +220,14 @@
         { "name": "Spring Break South Florida","type": "savings_target", "template": 0   },
         { "name": "Hershey Park",              "type": "savings_target", "template": 0   },
         { "name": "Carbon Offsets",            "type": "savings_target", "template": 0   },
-        { "name": "Family-Friends Travel 👪",  "type": "savings_target", "template": 350 }
+        { "name": "Family-Friends Travel 👪",  "type": "savings_target", "template": 350 },
+        { "name": "2018 cruise",               "type": "savings_target", "template": 0,  "active": false },
+        { "name": "Cruise 2019",               "type": "savings_target", "template": 0,  "active": false },
+        { "name": "Greece trip",               "type": "savings_target", "template": 0,  "active": false },
+        { "name": "Japan 2025",                "type": "savings_target", "template": 0,  "active": false },
+        { "name": "Maine trip",                "type": "savings_target", "template": 0,  "active": false },
+        { "name": "Paris trip",                "type": "savings_target", "template": 0,  "active": false },
+        { "name": "Taylor Swift Miami",        "type": "savings_target", "template": 0,  "active": false }
       ]
     },
     {
@@ -263,6 +270,44 @@
       "categories": [
         { "name": "Kori work misc", "type": "fluid", "template": 15 },
         { "name": "Neil work misc",  "type": "fluid", "template": 15 }
+      ]
+    },
+    {
+      "name": "Legacy Categories",
+      "sort_order": 18,
+      "categories": [
+        { "name": "AAdvantage",                                              "type": "fluid", "template": 0, "active": false },
+        { "name": "Amara Care",                                              "type": "fluid", "template": 0, "active": false },
+        { "name": "Amazon Store Card",                                       "type": "fluid", "template": 0, "active": false },
+        { "name": "Arco returned funds",                                     "type": "fluid", "template": 0, "active": false },
+        { "name": "Basement Repair",                                         "type": "fluid", "template": 0, "active": false },
+        { "name": "Beach House Rental",                                      "type": "fluid", "template": 0, "active": false },
+        { "name": "Chase RR",                                                "type": "fluid", "template": 0, "active": false },
+        { "name": "Chase Sapphire",                                          "type": "fluid", "template": 0, "active": false },
+        { "name": "Christmas Party",                                         "type": "fluid", "template": 0, "active": false },
+        { "name": "Citi Double Cash",                                        "type": "fluid", "template": 0, "active": false },
+        { "name": "Citi Premier",                                            "type": "fluid", "template": 0, "active": false },
+        { "name": "Columbia Academy",                                        "type": "fluid", "template": 0, "active": false },
+        { "name": "Covid 19 Education",                                      "type": "fluid", "template": 0, "active": false },
+        { "name": "Drapes Replacement",                                      "type": "fluid", "template": 0, "active": false },
+        { "name": "Fidelity Rewards Visa",                                   "type": "fluid", "template": 0, "active": false },
+        { "name": "Home moving expenses",                                    "type": "fluid", "template": 0, "active": false },
+        { "name": "Home new furniture",                                      "type": "fluid", "template": 0, "active": false },
+        { "name": "Home new technology budget",                              "type": "fluid", "template": 0, "active": false },
+        { "name": "Home purchase",                                           "type": "fluid", "template": 0, "active": false },
+        { "name": "Home sale repairs",                                       "type": "fluid", "template": 0, "active": false },
+        { "name": "IHG",                                                     "type": "fluid", "template": 0, "active": false },
+        { "name": "IHG Rewards Premier",                                     "type": "fluid", "template": 0, "active": false },
+        { "name": "Kori conference",                                         "type": "fluid", "template": 0, "active": false },
+        { "name": "NYC",                                                     "type": "fluid", "template": 0, "active": false },
+        { "name": "Neil chase sapphire",                                     "type": "fluid", "template": 0, "active": false },
+        { "name": "Phone",                                                   "type": "fluid", "template": 0, "active": false },
+        { "name": "Rapid Rewards Plus",                                      "type": "fluid", "template": 0, "active": false },
+        { "name": "South Africa",                                            "type": "fluid", "template": 0, "active": false },
+        { "name": "Southwest Rapid Rewards® Plus Credit Card - CREDIT CARD", "type": "fluid", "template": 0, "active": false },
+        { "name": "Target Credit Card",                                      "type": "fluid", "template": 0, "active": false },
+        { "name": "Target card",                                             "type": "fluid", "template": 0, "active": false },
+        { "name": "new computers",                                           "type": "fluid", "template": 0, "active": false }
       ]
     }
   ]

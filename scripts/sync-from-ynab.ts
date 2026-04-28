@@ -70,7 +70,7 @@ type AuthConfig =
 const BUDGET_ASSIGNMENTS_START_ROW = 508; // header row
 const BUDGET_ASSIGNMENTS_DATA_ROW = BUDGET_ASSIGNMENTS_START_ROW + 1;
 
-const SKIP_GROUPS = new Set(['Hidden Categories', 'Credit Card Payments']);
+const SKIP_GROUPS = new Set(['Credit Card Payments']);
 
 const TRANSACTIONS_COLUMNS = [
   'transaction_id', 'parent_id', 'split_group_id', 'source', 'external_id',
@@ -305,8 +305,9 @@ async function readYnabPlan(
   }
 
   const results: YnabPlanRow[] = [];
-  let skipped = 0;
-  let unmatched = 0;
+  let skippedCC = 0;
+  let skippedBadMonth = 0;
+  const unmatchedCategories = new Map<string, number>(); // category name → row count
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
@@ -315,31 +316,34 @@ async function readYnabPlan(
     const rawMonth = (row[monthCol] ?? '').trim();
     const rawAssigned = (row[assignedCol] ?? '0').trim();
 
-    // Skip Credit Card Payments and Hidden Categories groups
     if (SKIP_GROUPS.has(group)) {
-      skipped++;
+      skippedCC++;
       continue;
     }
 
     const month = parseYnabMonth(rawMonth);
     if (!month) {
-      log(`  ⚠ Row ${i + 1}: unrecognized month "${rawMonth}" — skipping`);
-      skipped++;
+      skippedBadMonth++;
       continue;
     }
 
     const normalized = normalizeForMatch(ynabCategory);
     const fc = categoryIndex.get(normalized);
     if (!fc) {
-      log(`  ⚠ Unmatched category "${ynabCategory}" (normalized: "${normalized}") — skipping`);
-      unmatched++;
+      unmatchedCategories.set(ynabCategory, (unmatchedCategories.get(ynabCategory) ?? 0) + 1);
       continue;
     }
 
     results.push({ month, category: fc.category, assigned: parseYnabAmount(rawAssigned) });
   }
 
-  log(`YNAB plan: parsed ${results.length} rows (skipped ${skipped} reserved, ${unmatched} unmatched categories)`);
+  const unmatchedRowCount = [...unmatchedCategories.values()].reduce((a, b) => a + b, 0);
+  log(`YNAB plan: parsed ${results.length} rows, skipped ${skippedCC} Credit Card Payment rows`);
+  if (skippedBadMonth > 0) log(`  ⚠ Skipped ${skippedBadMonth} rows with unrecognized month format`);
+  if (unmatchedCategories.size > 0) {
+    const names = [...unmatchedCategories.keys()].sort().join(', ');
+    log(`Unmatched categories (${unmatchedRowCount} rows skipped): [${names}]`);
+  }
   return results;
 }
 
