@@ -288,18 +288,19 @@ async function readYnabPlan(
     return [];
   }
 
-  // Detect columns from header row (case-insensitive)
+  // Detect columns from header row (case-insensitive, matches YNAB Plan CSV headers exactly)
+  // YNAB Plan export columns: Month, Category Group/Category, Category Group, Category, Assigned, Activity, Available
   const headers = rows[0].map((h: string) => h.toLowerCase().trim());
   const monthCol = headers.indexOf('month');
-  const groupCol = headers.indexOf('group');
+  const groupCol = headers.indexOf('category group');
   const categoryCol = headers.indexOf('category');
   const assignedCol = headers.indexOf('assigned');
 
   if ([monthCol, groupCol, categoryCol, assignedCol].some((c) => c === -1)) {
     bail(
-      `YNAB_Plan_Import: expected columns "month", "group", "category", "assigned" in row 1.\n` +
-      `Found: ${headers.join(', ')}\n` +
-      `Make sure you pasted the YNAB Plan CSV export (not Register or another export type).`
+      `YNAB_Plan_Import: expected columns "Month", "Category Group", "Category", "Assigned" in row 1.\n` +
+      `Found: ${rows[0].join(', ')}\n` +
+      `Make sure you pasted the YNAB Plan CSV export (Plan view, not Register or another export type).`
     );
   }
 
