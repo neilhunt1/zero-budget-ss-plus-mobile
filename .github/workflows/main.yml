@@ -50,7 +50,7 @@ jobs:
         run: npm run setup:prod
         env:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
-          GOOGLE_SHEET_ID: ${{ secrets.PROD_GOOGLE_SHEET_ID }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
 
   build:
     name: Build app
@@ -76,7 +76,7 @@ jobs:
         run: npm run build
         env:
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
-          VITE_GOOGLE_SHEET_ID: ${{ secrets.PROD_GOOGLE_SHEET_ID }}
+          VITE_GOOGLE_SHEET_ID: ${{ secrets.VITE_GOOGLE_SHEET_ID }}
           VITE_BASE_PATH: /zero-budget-ss-plus-mobile/
 
       - uses: actions/upload-pages-artifact@v3
