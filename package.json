@@ -12,7 +12,9 @@
     "test:ui": "vitest --ui",
     "validate:categories": "ts-node scripts/validate-categories.ts",
     "setup:dev": "ts-node scripts/setup-sheet.ts --env dev",
-    "setup:prod": "ts-node scripts/setup-sheet.ts --env prod"
+    "setup:prod": "ts-node scripts/setup-sheet.ts --env prod",
+    "sync-from-prod-to-dev": "ts-node scripts/sync-from-prod-to-dev.ts",
+    "test:integration": "vitest run tests/integration --passWithNoTests"
   },
   "dependencies": {
     "@react-oauth/google": "^0.12.1",

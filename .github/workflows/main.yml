@@ -1,0 +1,98 @@
+name: Main
+
+on:
+  push:
+    branches: [main]
+
+# Pages deployment requires these at the workflow level
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  checks: write
+
+# Only one deployment at a time; cancel any in-progress run if a new push lands
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  test-and-provision:
+    name: Unit tests + provision prod sheet
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Upload test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Vitest Unit Tests (main)
+          path: test-results/junit.xml
+          reporter: jest-junit
+          fail-on-error: true
+
+      - name: Provision prod sheet
+        run: npm run setup:prod
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          GOOGLE_SHEET_ID: ${{ secrets.PROD_GOOGLE_SHEET_ID }}
+
+  build:
+    name: Build app
+    needs: test-and-provision
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Validate categories.json
+        run: npm run validate:categories
+
+      - name: Build app
+        run: npm run build
+        env:
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          VITE_GOOGLE_SHEET_ID: ${{ secrets.PROD_GOOGLE_SHEET_ID }}
+          VITE_BASE_PATH: /zero-budget-ss-plus-mobile/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/app
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

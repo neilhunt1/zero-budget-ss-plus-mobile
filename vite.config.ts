@@ -12,7 +12,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['tests/**/*.test.ts'],
+    include: ['tests/unit/**/*.test.ts'],
     // Emit JUnit XML so the GitHub Actions Test Reporter can annotate PRs.
     reporters: ['default', 'junit'],
     outputFile: { junit: 'test-results/junit.xml' },
