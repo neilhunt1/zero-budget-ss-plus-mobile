@@ -15,6 +15,8 @@
     "setup:prod": "ts-node scripts/setup-sheet.ts --env prod",
     "sync-from-ynab:dev": "ts-node scripts/sync-from-ynab.ts --env dev",
     "sync-from-ynab:prod": "ts-node scripts/sync-from-ynab.ts --env prod"
+    "sync-from-prod-to-dev": "ts-node scripts/sync-from-prod-to-dev.ts",
+    "test:integration": "vitest run tests/integration --passWithNoTests"
   },
   "dependencies": {
     "@react-oauth/google": "^0.12.1",
