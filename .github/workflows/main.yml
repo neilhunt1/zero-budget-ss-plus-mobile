@@ -79,7 +79,7 @@ jobs:
           VITE_GOOGLE_SHEET_ID: ${{ secrets.VITE_GOOGLE_SHEET_ID }}
           VITE_BASE_PATH: /zero-budget-ss-plus-mobile/
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist/app
 
