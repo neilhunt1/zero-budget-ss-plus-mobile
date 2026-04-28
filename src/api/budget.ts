@@ -12,8 +12,13 @@ const CATEGORY_COLS = [
   'active',
 ] as const;
 
-// Must match BUDGET_ASSIGNMENTS_START_ROW in setup-sheet.ts
-const ASSIGNMENTS_START_ROW = 502;
+// Must match BUDGET_ASSIGNMENTS_START_ROW in setup-sheet.ts.
+// Row 508 = header; data starts at row 509.
+const ASSIGNMENTS_START_ROW = 508;
+
+// Must match BUDGET_CATEGORIES_START_ROW / BUDGET_CATEGORIES_END_ROW in setup-sheet.ts.
+const CATEGORIES_START_ROW = 7;
+const CATEGORIES_END_ROW = 506;
 
 // ─── Parse helpers ─────────────────────────────────────────────────────────────
 
@@ -35,14 +40,14 @@ function parseCategoryRow(row: string[], rowIndex: number): BudgetCategory {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Fetch all active budget categories from the Budget tab (rows 2–501).
+ * Fetch all active budget categories from the Budget tab.
  * Sorted by sort_order ascending.
  */
 export async function fetchBudgetCategories(client: SheetsClient): Promise<BudgetCategory[]> {
-  const res = await client.getValues('Budget!A2:G501');
+  const res = await client.getValues(`Budget!A${CATEGORIES_START_ROW}:G${CATEGORIES_END_ROW}`);
   const rows = res.values ?? [];
   return rows
-    .map((row, i) => parseCategoryRow(row, i + 2))
+    .map((row, i) => parseCategoryRow(row, i + CATEGORIES_START_ROW))
     .filter((c) => c.category && c.active)
     .sort((a, b) => a.sort_order - b.sort_order);
 }
@@ -55,7 +60,7 @@ export async function fetchMonthAssignments(
   client: SheetsClient,
   month: string
 ): Promise<BudgetAssignment[]> {
-  const res = await client.getValues(`Budget!A${ASSIGNMENTS_START_ROW + 1}:C`);
+  const res = await client.getValues(`Budget!A${ASSIGNMENTS_START_ROW + 1}:D`);
   const rows = res.values ?? [];
   return rows
     .map(
@@ -63,6 +68,7 @@ export async function fetchMonthAssignments(
         month: row[0] ?? '',
         category: row[1] ?? '',
         assigned: parseFloat(row[2]) || 0,
+        source: row[3] ?? 'manual',
         _rowIndex: ASSIGNMENTS_START_ROW + 1 + i,
       })
     )
@@ -78,16 +84,17 @@ export async function upsertAssignment(
   month: string,
   category: string,
   assigned: number,
-  existing?: BudgetAssignment
+  existing?: BudgetAssignment,
+  source = 'manual'
 ): Promise<void> {
   if (existing) {
     await client.updateValues(
-      `Budget!A${existing._rowIndex}:C${existing._rowIndex}`,
-      [[month, category, assigned]]
+      `Budget!A${existing._rowIndex}:D${existing._rowIndex}`,
+      [[month, category, assigned, source]]
     );
   } else {
     await client.appendValues(`Budget!A${ASSIGNMENTS_START_ROW + 1}`, [
-      [month, category, assigned],
+      [month, category, assigned, source],
     ]);
   }
 }

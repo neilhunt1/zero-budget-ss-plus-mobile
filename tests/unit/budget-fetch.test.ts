@@ -140,11 +140,11 @@ describe('fetchMonthAssignments', () => {
 describe('upsertAssignment', () => {
   it('calls updateValues when an existing assignment is provided', async () => {
     const client = mockClient([]);
-    const existing = { month: '2025-04', category: 'Groceries', assigned: 400, _rowIndex: 510 };
+    const existing = { month: '2025-04', category: 'Groceries', assigned: 400, source: 'manual', _rowIndex: 510 };
     await upsertAssignment(client, '2025-04', 'Groceries', 500, existing);
     expect(client.updateValues).toHaveBeenCalledWith(
-      'Budget!A510:C510',
-      [['2025-04', 'Groceries', 500]]
+      'Budget!A510:D510',
+      [['2025-04', 'Groceries', 500, 'manual']]
     );
     expect(client.appendValues).not.toHaveBeenCalled();
   });
@@ -153,8 +153,8 @@ describe('upsertAssignment', () => {
     const client = mockClient([]);
     await upsertAssignment(client, '2025-04', 'Gas', 75);
     expect(client.appendValues).toHaveBeenCalledWith(
-      'Budget!A503',
-      [['2025-04', 'Gas', 75]]
+      'Budget!A509',
+      [['2025-04', 'Gas', 75, 'manual']]
     );
     expect(client.updateValues).not.toHaveBeenCalled();
   });
