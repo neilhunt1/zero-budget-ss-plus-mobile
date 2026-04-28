@@ -4,6 +4,9 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   unit-tests:
     name: Unit tests
@@ -26,7 +29,7 @@ jobs:
         run: npm test
 
       - name: Upload test results
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v3
         if: always()
         with:
           name: Vitest Unit Tests
@@ -34,8 +37,8 @@ jobs:
           reporter: jest-junit
           fail-on-error: true
 
-  integration-tests:
-    name: Integration tests
+  prepare-dev-sheet:
+    name: Provision dev sheet
     runs-on: ubuntu-latest
     needs: unit-tests
     permissions:
@@ -62,7 +65,24 @@ jobs:
         env:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
           DEV_GOOGLE_SHEET_ID: ${{ secrets.DEV_GOOGLE_SHEET_ID }}
-          PROD_GOOGLE_SHEET_ID: ${{ secrets.PROD_GOOGLE_SHEET_ID }}
+          PROD_GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
+  integration-tests:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    needs: prepare-dev-sheet
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
 
       - name: Run integration tests
         run: npm run test:integration

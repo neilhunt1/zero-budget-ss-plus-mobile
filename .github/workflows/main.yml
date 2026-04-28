@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 # Pages deployment requires these at the workflow level
 permissions:
   contents: read
@@ -38,7 +41,7 @@ jobs:
         run: npm test
 
       - name: Upload test results
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v3
         if: always()
         with:
           name: Vitest Unit Tests (main)
