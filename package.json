@@ -2,6 +2,7 @@
   "name": "zero-budget",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.app.json --noEmit && vite build",
@@ -10,12 +11,12 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",
-    "validate:categories": "ts-node scripts/validate-categories.ts",
-    "setup:dev": "ts-node scripts/setup-sheet.ts --env dev",
-    "setup:prod": "ts-node scripts/setup-sheet.ts --env prod",
-    "sync-from-ynab:dev": "ts-node scripts/sync-from-ynab.ts --env dev",
-    "sync-from-ynab:prod": "ts-node scripts/sync-from-ynab.ts --env prod",
-    "sync-from-prod-to-dev": "ts-node scripts/sync-from-prod-to-dev.ts",
+    "validate:categories": "ts-node --project tsconfig.scripts.json scripts/validate-categories.ts",
+    "setup:dev": "ts-node --project tsconfig.scripts.json scripts/setup-sheet.ts --env dev",
+    "setup:prod": "ts-node --project tsconfig.scripts.json scripts/setup-sheet.ts --env prod",
+    "sync-from-ynab:dev": "ts-node --project tsconfig.scripts.json scripts/sync-from-ynab.ts --env dev",
+    "sync-from-ynab:prod": "ts-node --project tsconfig.scripts.json scripts/sync-from-ynab.ts --env prod",
+    "sync-from-prod-to-dev": "ts-node --project tsconfig.scripts.json scripts/sync-from-prod-to-dev.ts",
     "test:integration": "vitest run tests/integration --passWithNoTests"
   },
   "dependencies": {

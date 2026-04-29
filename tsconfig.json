@@ -1,14 +1,7 @@
 {
-  "compilerOptions": {
-    "target": "ES2020",
-    "module": "commonjs",
-    "lib": ["ES2020"],
-    "strict": true,
-    "esModuleInterop": true,
-    "resolveJsonModule": true,
-    "outDir": "dist",
-    "rootDir": "."
-  },
-  "include": ["scripts/**/*", "config/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.scripts.json" }
+  ]
 }
