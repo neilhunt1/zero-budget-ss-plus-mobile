@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useSheetSync } from '../hooks/useSheetSync';
 import { SheetsClient } from '../api/client';
-import { fetchBudgetCategories, fetchMonthAssignments, buildGroupedBudget } from '../api/budget';
+import { fetchBudgetCategories, fetchMonthAssignments, buildGroupedBudget, fetchReadyToAssign } from '../api/budget';
 import { fetchTransactions, computeCategoryActivity } from '../api/transactions';
 import { GroupedBudget } from '../types';
 
@@ -26,6 +26,7 @@ export default function Plan() {
   const revision = useSheetSync(token);
   const [month, setMonth] = useState(() => toYYYYMM(new Date()));
   const [groups, setGroups] = useState<GroupedBudget[]>([]);
+  const [readyToAssign, setReadyToAssign] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,6 +44,7 @@ export default function Plan() {
       ]);
       const activityMap = computeCategoryActivity(transactions);
       setGroups(buildGroupedBudget(categories, assignments, activityMap));
+      setReadyToAssign(await fetchReadyToAssign(client));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -67,6 +69,13 @@ export default function Plan() {
           className="month-picker"
         />
       </header>
+
+      <div className={`ready-to-assign${readyToAssign < 0 ? ' negative-bg' : ''}`}>
+        <span className="rta-label">Ready to Assign</span>
+        <span className={`rta-value${readyToAssign < 0 ? ' negative' : ' positive'}`}>
+          {fmt(readyToAssign)}
+        </span>
+      </div>
 
       {loading && <div className="state-msg">Loading…</div>}
       {error && <div className="state-msg error">{error}</div>}

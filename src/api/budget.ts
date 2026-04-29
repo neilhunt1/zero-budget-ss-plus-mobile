@@ -40,6 +40,16 @@ function parseCategoryRow(row: string[], rowIndex: number): BudgetCategory {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
+ * Fetch the Ready to Assign balance from Budget!B1 (the sheet formula).
+ * The sheet formula is authoritative — it spans all months and transactions.
+ */
+export async function fetchReadyToAssign(client: SheetsClient): Promise<number> {
+  const res = await client.getValues('Budget!B1');
+  const raw = (res.values?.[0]?.[0] ?? '0').toString().replace(/^'/, '');
+  return parseFloat(raw) || 0;
+}
+
+/**
  * Fetch all active budget categories from the Budget tab.
  * Sorted by sort_order ascending.
  */

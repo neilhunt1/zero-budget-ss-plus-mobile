@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fetchBudgetCategories, fetchMonthAssignments, upsertAssignment } from '../../src/api/budget';
+import { fetchBudgetCategories, fetchMonthAssignments, upsertAssignment, fetchReadyToAssign } from '../../src/api/budget';
 import type { SheetsClient } from '../../src/api/client';
 
 // ─── Mock helpers ─────────────────────────────────────────────────────────────
@@ -27,6 +27,35 @@ function categoryRow(
 ): string[] {
   return [group, subgroup, category, type, template, sortOrder, active];
 }
+
+// ─── fetchReadyToAssign ───────────────────────────────────────────────────────
+
+describe('fetchReadyToAssign', () => {
+  it('parses a plain numeric value', async () => {
+    const client = mockClient([['1234.56']]);
+    expect(await fetchReadyToAssign(client)).toBe(1234.56);
+  });
+
+  it('strips a leading apostrophe before parsing', async () => {
+    const client = mockClient([[`'567.89`]]);
+    expect(await fetchReadyToAssign(client)).toBe(567.89);
+  });
+
+  it('returns 0 when the cell is empty', async () => {
+    const client = mockClient([]);
+    expect(await fetchReadyToAssign(client)).toBe(0);
+  });
+
+  it('returns 0 when the cell contains a non-numeric string', async () => {
+    const client = mockClient([['N/A']]);
+    expect(await fetchReadyToAssign(client)).toBe(0);
+  });
+
+  it('handles negative values', async () => {
+    const client = mockClient([['-250']]);
+    expect(await fetchReadyToAssign(client)).toBe(-250);
+  });
+});
 
 // ─── fetchBudgetCategories ────────────────────────────────────────────────────
 

@@ -11,10 +11,13 @@ export default defineConfig({
     outDir: 'dist/app',
   },
   test: {
+    globals: true,
     environment: 'node',
-    include: ['tests/unit/**/*.test.ts'],
+    environmentMatchGlobs: [['tests/unit/**/*.test.tsx', 'jsdom']],
+    setupFiles: ['./tests/setup.ts'],
+    include: ['tests/unit/**/*.test.{ts,tsx}'],
     // Emit JUnit XML so the GitHub Actions Test Reporter can annotate PRs.
-    reporters: ['default', 'junit'],
+    reporters: ['verbose', 'junit'],
     outputFile: { junit: 'test-results/junit.xml' },
     coverage: {
       provider: 'v8',

@@ -85,6 +85,16 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   padding: 4px 8px; background: var(--bg); color: var(--text);
 }
 
+/* ── Ready to Assign banner ───────────────────────────────────────────────── */
+.ready-to-assign {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 12px 16px; background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.ready-to-assign.negative-bg { background: #fff5f4; }
+.rta-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 2px; }
+.rta-value { font-size: 28px; font-weight: 700; }
+
 /* ── Shared ───────────────────────────────────────────────────────────────── */
 .state-msg { padding: 24px 16px; color: var(--text-secondary); text-align: center; }
 .state-msg.error { color: var(--negative); }
