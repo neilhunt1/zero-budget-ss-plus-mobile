@@ -13,7 +13,7 @@ import * as fs from "fs";
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { google, sheets_v4 } from "googleapis";
-import { handleRemovedCategory } from "./category-utils.js";
+import { handleRemovedCategory } from "./category-utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
