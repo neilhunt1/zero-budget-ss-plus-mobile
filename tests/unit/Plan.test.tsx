@@ -18,12 +18,14 @@ vi.mock('../../src/api/client', () => ({
 }));
 
 const mockFetchBudgetCategories = vi.fn().mockResolvedValue([]);
-const mockFetchMonthAssignments = vi.fn();
+const mockFetchMonthAssignments = vi.fn().mockResolvedValue([]);
+const mockFetchReadyToAssign = vi.fn().mockResolvedValue(0);
 const mockBuildGroupedBudget = vi.fn().mockReturnValue([]);
 
 vi.mock('../../src/api/budget', () => ({
   fetchBudgetCategories: (...args: unknown[]) => mockFetchBudgetCategories(...args),
   fetchMonthAssignments: (...args: unknown[]) => mockFetchMonthAssignments(...args),
+  fetchReadyToAssign: (...args: unknown[]) => mockFetchReadyToAssign(...args),
   buildGroupedBudget: (...args: unknown[]) => mockBuildGroupedBudget(...args),
 }));
 
@@ -80,15 +82,14 @@ describe('Plan screen — Ready to Assign', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFetchBudgetCategories.mockResolvedValue([]);
+    mockFetchMonthAssignments.mockResolvedValue([]);
+    mockFetchTransactions.mockResolvedValue([]);
     mockBuildGroupedBudget.mockReturnValue([]);
     mockComputeCategoryActivity.mockReturnValue({});
   });
 
-  it('shows positive Ready to Assign in green', async () => {
-    mockFetchTransactions.mockResolvedValue([
-      makeTransaction({ inflow: 500, transaction_type: 'credit' }),
-    ]);
-    mockFetchMonthAssignments.mockResolvedValue([makeAssignment(200)]);
+  it('shows positive Ready to Assign from the sheet formula in green', async () => {
+    mockFetchReadyToAssign.mockResolvedValue(300);
 
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
@@ -102,11 +103,8 @@ describe('Plan screen — Ready to Assign', () => {
     expect(valueEl).not.toHaveClass('negative');
   });
 
-  it('shows negative Ready to Assign in red', async () => {
-    mockFetchTransactions.mockResolvedValue([
-      makeTransaction({ inflow: 100, transaction_type: 'credit' }),
-    ]);
-    mockFetchMonthAssignments.mockResolvedValue([makeAssignment(400)]);
+  it('shows negative Ready to Assign from the sheet formula in red', async () => {
+    mockFetchReadyToAssign.mockResolvedValue(-300);
 
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
@@ -118,22 +116,5 @@ describe('Plan screen — Ready to Assign', () => {
     const valueEl = screen.getByText('-$300');
     expect(valueEl).toHaveClass('negative');
     expect(valueEl).not.toHaveClass('positive');
-  });
-
-  it('excludes transfer transactions from inflow sum', async () => {
-    mockFetchTransactions.mockResolvedValue([
-      makeTransaction({ transaction_id: 't1', inflow: 500, transaction_type: 'transfer' }),
-      makeTransaction({ transaction_id: 't2', inflow: 100, transaction_type: 'credit' }),
-    ]);
-    mockFetchMonthAssignments.mockResolvedValue([]);
-
-    const { default: Plan } = await import('../../src/screens/Plan');
-    render(<Plan />);
-
-    await waitFor(() => {
-      expect(screen.getByText('$100')).toBeInTheDocument();
-    });
-
-    expect(screen.queryByText('$600')).not.toBeInTheDocument();
   });
 });

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useSheetSync } from '../hooks/useSheetSync';
 import { SheetsClient } from '../api/client';
-import { fetchBudgetCategories, fetchMonthAssignments, buildGroupedBudget } from '../api/budget';
+import { fetchBudgetCategories, fetchMonthAssignments, buildGroupedBudget, fetchReadyToAssign } from '../api/budget';
 import { fetchTransactions, computeCategoryActivity } from '../api/transactions';
 import { GroupedBudget } from '../types';
 
@@ -44,10 +44,7 @@ export default function Plan() {
       ]);
       const activityMap = computeCategoryActivity(transactions);
       setGroups(buildGroupedBudget(categories, assignments, activityMap));
-      const nonTransfers = transactions.filter(t => t.transaction_type !== 'transfer');
-      const totalInflow = nonTransfers.reduce((s, t) => s + t.inflow, 0);
-      const totalMonthAssigned = assignments.reduce((s, a) => s + a.assigned, 0);
-      setReadyToAssign(totalInflow - totalMonthAssigned);
+      setReadyToAssign(await fetchReadyToAssign(client));
     } catch (e) {
       setError((e as Error).message);
     } finally {
