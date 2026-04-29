@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fetchBudgetCategories, fetchMonthAssignments, upsertAssignment, fetchReadyToAssign } from '../../src/api/budget';
+import { fetchBudgetCategories, fetchMonthAssignments, upsertAssignment, fetchReadyToAssign, appendLogEntry } from '../../src/api/budget';
 import type { SheetsClient } from '../../src/api/client';
 
 // ─── Mock helpers ─────────────────────────────────────────────────────────────
@@ -186,5 +186,49 @@ describe('upsertAssignment', () => {
       [['2025-04', 'Gas', 75, 'manual']]
     );
     expect(client.updateValues).not.toHaveBeenCalled();
+  });
+});
+
+// ─── appendLogEntry ───────────────────────────────────────────────────────────
+
+describe('appendLogEntry', () => {
+  it('appends a log row to Budget_Log with correct fields', async () => {
+    const client = mockClient([]);
+    await appendLogEntry(client, '2026-04', 'Groceries', 100, 'manual');
+    expect(client.appendValues).toHaveBeenCalledWith(
+      'Budget_Log!A2',
+      [[expect.any(String), '2026-04', 'Groceries', 100, 'manual', '']]
+    );
+  });
+
+  it('uses empty string as default note', async () => {
+    const client = mockClient([]);
+    await appendLogEntry(client, '2026-04', 'Groceries', 50, 'manual');
+    const [[, [row]]] = (client.appendValues as ReturnType<typeof vi.fn>).mock.calls;
+    expect(row[5]).toBe('');
+  });
+
+  it('includes the note when provided', async () => {
+    const client = mockClient([]);
+    await appendLogEntry(client, '2026-04', 'Gas', -50, 'move_from:Groceries', 'rebalance');
+    const [[, [row]]] = (client.appendValues as ReturnType<typeof vi.fn>).mock.calls;
+    expect(row[4]).toBe('move_from:Groceries');
+    expect(row[5]).toBe('rebalance');
+  });
+
+  it('records the timestamp as an ISO string', async () => {
+    const client = mockClient([]);
+    const before = new Date().toISOString();
+    await appendLogEntry(client, '2026-04', 'Groceries', 100, 'manual');
+    const after = new Date().toISOString();
+    const [[, [row]]] = (client.appendValues as ReturnType<typeof vi.fn>).mock.calls;
+    expect(row[0] >= before && row[0] <= after).toBe(true);
+  });
+
+  it('passes negative deltas for decreases', async () => {
+    const client = mockClient([]);
+    await appendLogEntry(client, '2026-04', 'Dining Out', -200, 'manual');
+    const [[, [row]]] = (client.appendValues as ReturnType<typeof vi.fn>).mock.calls;
+    expect(row[3]).toBe(-200);
   });
 });

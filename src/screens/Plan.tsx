@@ -2,9 +2,16 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useSheetSync } from '../hooks/useSheetSync';
 import { SheetsClient } from '../api/client';
-import { fetchBudgetCategories, fetchMonthAssignments, buildGroupedBudget, fetchReadyToAssign } from '../api/budget';
+import {
+  fetchBudgetCategories,
+  fetchMonthAssignments,
+  buildGroupedBudget,
+  fetchReadyToAssign,
+  upsertAssignment,
+  appendLogEntry,
+} from '../api/budget';
 import { fetchTransactions, computeCategoryActivity } from '../api/transactions';
-import { GroupedBudget } from '../types';
+import { GroupedBudget, BudgetAssignment, CategoryWithActivity } from '../types';
 
 const SHEET_ID = import.meta.env.VITE_GOOGLE_SHEET_ID as string;
 
@@ -21,14 +28,24 @@ function fmt(n: number): string {
   });
 }
 
+interface EditState {
+  cat: CategoryWithActivity;
+  existing: BudgetAssignment | undefined;
+  inputValue: string;
+  saving: boolean;
+  saveError: string | null;
+}
+
 export default function Plan() {
   const { token } = useAuth();
   const revision = useSheetSync(token);
   const [month, setMonth] = useState(() => toYYYYMM(new Date()));
   const [groups, setGroups] = useState<GroupedBudget[]>([]);
+  const [assignments, setAssignments] = useState<BudgetAssignment[]>([]);
   const [readyToAssign, setReadyToAssign] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editState, setEditState] = useState<EditState | null>(null);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -37,13 +54,14 @@ export default function Plan() {
     setError(null);
 
     try {
-      const [categories, assignments, transactions] = await Promise.all([
+      const [cats, rawAssignments, txns] = await Promise.all([
         fetchBudgetCategories(client),
         fetchMonthAssignments(client, month),
         fetchTransactions(client, { month }),
       ]);
-      const activityMap = computeCategoryActivity(transactions);
-      setGroups(buildGroupedBudget(categories, assignments, activityMap));
+      const activityMap = computeCategoryActivity(txns);
+      setAssignments(rawAssignments);
+      setGroups(buildGroupedBudget(cats, rawAssignments, activityMap));
       setReadyToAssign(await fetchReadyToAssign(client));
     } catch (e) {
       setError((e as Error).message);
@@ -57,6 +75,38 @@ export default function Plan() {
   const totalAssigned = groups.reduce((s, g) => s + g.totalAssigned, 0);
   const totalActivity = groups.reduce((s, g) => s + g.totalActivity, 0);
   const totalAvailable = groups.reduce((s, g) => s + g.totalAvailable, 0);
+
+  const handleRowClick = (cat: CategoryWithActivity) => {
+    const existing = assignments.find((a) => a.category === cat.category);
+    setEditState({
+      cat,
+      existing,
+      inputValue: cat.assigned === 0 ? '' : String(cat.assigned),
+      saving: false,
+      saveError: null,
+    });
+  };
+
+  const handleCancel = () => setEditState(null);
+
+  const handleSave = async () => {
+    if (!editState || !token) return;
+    const amount = parseFloat(editState.inputValue) || 0;
+    const { cat, existing } = editState;
+    setEditState((prev) => prev ? { ...prev, saving: true, saveError: null } : null);
+    try {
+      const client = new SheetsClient(SHEET_ID, token);
+      await upsertAssignment(client, month, cat.category, amount, existing);
+      const delta = amount - (existing?.assigned ?? 0);
+      await appendLogEntry(client, month, cat.category, delta, 'manual');
+      setEditState(null);
+      await load();
+    } catch (e) {
+      setEditState((prev) =>
+        prev ? { ...prev, saving: false, saveError: (e as Error).message } : null
+      );
+    }
+  };
 
   return (
     <div className="screen plan-screen">
@@ -122,9 +172,11 @@ export default function Plan() {
                     <div className="subgroup-header">{subgroupName}</div>
                   )}
                   {categories.map((cat) => (
-                    <div
+                    <button
                       key={cat.category}
+                      type="button"
                       className={`budget-row${cat.available < 0 ? ' overspent' : ''}`}
+                      onClick={() => handleRowClick(cat)}
                     >
                       <span className="col-name">{cat.category}</span>
                       <span className="col-num">{fmt(cat.assigned)}</span>
@@ -132,7 +184,7 @@ export default function Plan() {
                       <span className={`col-num${cat.available < 0 ? ' negative' : ''}`}>
                         {fmt(cat.available)}
                       </span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               ))}
@@ -143,6 +195,50 @@ export default function Plan() {
             <div className="state-msg">No categories found. Run <code>npm run setup:dev</code> first.</div>
           )}
         </>
+      )}
+
+      {editState && (
+        <div className="assign-overlay" onClick={handleCancel}>
+          <div className="assign-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="assign-sheet-handle" />
+            <div className="assign-sheet-title">{editState.cat.category}</div>
+            <label className="assign-label" htmlFor="assign-input">Assigned amount</label>
+            <input
+              id="assign-input"
+              className="assign-input"
+              type="number"
+              inputMode="decimal"
+              value={editState.inputValue}
+              onChange={(e) =>
+                setEditState((prev) => prev ? { ...prev, inputValue: e.target.value } : null)
+              }
+              placeholder="0"
+              // eslint-disable-next-line jsx-a11y/no-autofocus
+              autoFocus
+            />
+            {editState.saveError && (
+              <div className="assign-save-error">{editState.saveError}</div>
+            )}
+            <div className="assign-sheet-actions">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={handleCancel}
+                disabled={editState.saving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={handleSave}
+                disabled={editState.saving}
+              >
+                {editState.saving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
