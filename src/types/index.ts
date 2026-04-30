@@ -72,11 +72,17 @@ export interface Template {
 
 // ─── Derived / Computed ────────────────────────────────────────────────────────
 
+/** Pre-calculated activity and available for one category in one month, from Budget_Calcs tab. */
+export interface CategoryCalcs {
+  activity: number; // outflow − inflow for the month
+  available: number; // includes rollover from prior months
+}
+
 /** A budget category enriched with computed month values. */
 export interface CategoryWithActivity extends BudgetCategory {
   assigned: number;
   activity: number; // outflow − inflow for the month
-  available: number; // assigned − activity
+  available: number; // available for the month (includes rollover from prior months)
 }
 
 /** Budget view for a single month, grouped for rendering. */

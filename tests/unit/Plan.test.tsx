@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import type { Transaction, BudgetAssignment, CategoryWithActivity, GroupedBudget } from '../../src/types';
+import type { BudgetAssignment, CategoryWithActivity, GroupedBudget } from '../../src/types';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -19,6 +19,7 @@ vi.mock('../../src/api/client', () => ({
 
 const mockFetchBudgetCategories = vi.fn().mockResolvedValue([]);
 const mockFetchMonthAssignments = vi.fn().mockResolvedValue([]);
+const mockFetchCategoryCalcs = vi.fn().mockResolvedValue(new Map());
 const mockFetchReadyToAssign = vi.fn().mockResolvedValue(0);
 const mockBuildGroupedBudget = vi.fn().mockReturnValue([]);
 const mockUpsertAssignment = vi.fn().mockResolvedValue(undefined);
@@ -27,54 +28,14 @@ const mockAppendLogEntry = vi.fn().mockResolvedValue(undefined);
 vi.mock('../../src/api/budget', () => ({
   fetchBudgetCategories: (...args: unknown[]) => mockFetchBudgetCategories(...args),
   fetchMonthAssignments: (...args: unknown[]) => mockFetchMonthAssignments(...args),
+  fetchCategoryCalcs: (...args: unknown[]) => mockFetchCategoryCalcs(...args),
   fetchReadyToAssign: (...args: unknown[]) => mockFetchReadyToAssign(...args),
   buildGroupedBudget: (...args: unknown[]) => mockBuildGroupedBudget(...args),
   upsertAssignment: (...args: unknown[]) => mockUpsertAssignment(...args),
   appendLogEntry: (...args: unknown[]) => mockAppendLogEntry(...args),
 }));
 
-const mockFetchTransactions = vi.fn();
-const mockComputeCategoryActivity = vi.fn().mockReturnValue({});
-
-vi.mock('../../src/api/transactions', () => ({
-  fetchTransactions: (...args: unknown[]) => mockFetchTransactions(...args),
-  computeCategoryActivity: (...args: unknown[]) => mockComputeCategoryActivity(...args),
-}));
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function makeTransaction(overrides: Partial<Transaction>): Transaction {
-  return {
-    transaction_id: 't1',
-    parent_id: '',
-    split_group_id: '',
-    source: 'manual',
-    external_id: '',
-    imported_at: '',
-    status: 'cleared',
-    date: '2026-04-15',
-    payee: 'Test',
-    description: '',
-    category: '',
-    suggested_category: '',
-    category_subgroup: '',
-    category_group: '',
-    category_type: '',
-    outflow: 0,
-    inflow: 0,
-    account: '',
-    memo: '',
-    transaction_type: 'credit',
-    transfer_pair_id: '',
-    flag: '',
-    needs_reimbursement: false,
-    reimbursement_amount: 0,
-    matched_id: '',
-    reviewed: false,
-    _rowIndex: 2,
-    ...overrides,
-  };
-}
 
 function makeAssignment(assigned: number): BudgetAssignment {
   return { month: '2026-04', category: 'Groceries', assigned, source: 'manual', _rowIndex: 509 };
@@ -114,9 +75,8 @@ describe('Plan screen — Ready to Assign', () => {
     vi.clearAllMocks();
     mockFetchBudgetCategories.mockResolvedValue([]);
     mockFetchMonthAssignments.mockResolvedValue([]);
-    mockFetchTransactions.mockResolvedValue([]);
+    mockFetchCategoryCalcs.mockResolvedValue(new Map());
     mockBuildGroupedBudget.mockReturnValue([]);
-    mockComputeCategoryActivity.mockReturnValue({});
     mockUpsertAssignment.mockResolvedValue(undefined);
     mockAppendLogEntry.mockResolvedValue(undefined);
   });
@@ -157,10 +117,9 @@ describe('Plan screen — assign money', () => {
     vi.clearAllMocks();
     mockFetchBudgetCategories.mockResolvedValue([]);
     mockFetchMonthAssignments.mockResolvedValue([makeAssignment(400)]);
-    mockFetchTransactions.mockResolvedValue([]);
+    mockFetchCategoryCalcs.mockResolvedValue(new Map());
     mockFetchReadyToAssign.mockResolvedValue(500);
     mockBuildGroupedBudget.mockReturnValue(makeGroupedBudget());
-    mockComputeCategoryActivity.mockReturnValue(new Map());
     mockUpsertAssignment.mockResolvedValue(undefined);
     mockAppendLogEntry.mockResolvedValue(undefined);
   });

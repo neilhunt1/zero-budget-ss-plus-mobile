@@ -5,12 +5,12 @@ import { SheetsClient } from '../api/client';
 import {
   fetchBudgetCategories,
   fetchMonthAssignments,
+  fetchCategoryCalcs,
   buildGroupedBudget,
   fetchReadyToAssign,
   upsertAssignment,
   appendLogEntry,
 } from '../api/budget';
-import { fetchTransactions, computeCategoryActivity } from '../api/transactions';
 import { GroupedBudget, BudgetAssignment, CategoryWithActivity } from '../types';
 
 const SHEET_ID = import.meta.env.VITE_GOOGLE_SHEET_ID as string;
@@ -54,14 +54,13 @@ export default function Plan() {
     setError(null);
 
     try {
-      const [cats, rawAssignments, txns] = await Promise.all([
+      const [cats, rawAssignments, calcs] = await Promise.all([
         fetchBudgetCategories(client),
         fetchMonthAssignments(client, month),
-        fetchTransactions(client, { month }),
+        fetchCategoryCalcs(client, month),
       ]);
-      const activityMap = computeCategoryActivity(txns);
       setAssignments(rawAssignments);
-      setGroups(buildGroupedBudget(cats, rawAssignments, activityMap));
+      setGroups(buildGroupedBudget(cats, rawAssignments, calcs));
       setReadyToAssign(await fetchReadyToAssign(client));
     } catch (e) {
       setError((e as Error).message);

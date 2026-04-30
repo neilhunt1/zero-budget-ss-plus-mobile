@@ -135,18 +135,25 @@ const TABS_IN_ORDER = [
   "Templates",
   "Reflect",
   "Budget_Log",
+  "Budget_Calcs",
   "Transactions (BTS)",
   "Balance History (BTS)",
   "YNAB_Plan_Import",
   "YNAB_Transactions_Import",
 ];
 
+const BUDGET_CALCS_COLUMNS = ["month", "category", "activity", "assigned", "available"];
+
+// How many months back/forward from today to generate Budget_Calcs rows.
+const CALCS_MONTHS_BACK = 36;
+const CALCS_MONTHS_FORWARD = 24;
+
 // Header background color (Google blue)
 const HEADER_BG_COLOR = { red: 0.29, green: 0.525, blue: 0.91 };
 const HEADER_FG_COLOR = { red: 1, green: 1, blue: 1 };
 
 // Sheet schema version — increment when structure changes
-const SHEET_VERSION = 4;
+const SHEET_VERSION = 5;
 
 // ─── Environment Loading ───────────────────────────────────────────────────────
 
@@ -983,6 +990,147 @@ async function writeBudgetDashboard(
   log("Budget dashboard: wrote rows 1–4 (ReadyToAssign, LastYnabSync, TotalAssignedThisMonth, TotalAvailable)");
 }
 
+// ─── Step: Write Budget_Calcs Formulas ────────────────────────────────────────
+//
+// Budget_Calcs holds one row per (month, category) pair.
+// Each row has SUMPRODUCT-based formulas for Activity and Assigned, and a
+// rollover-aware Available formula that chains to the previous month's row.
+// The tab is cleared and rewritten on every setup run so it stays in sync
+// with any category changes and the rolling month window.
+
+function generateMonthRange(monthsBack: number, monthsForward: number): string[] {
+  const months: string[] = [];
+  const now = new Date();
+  const baseYear = now.getFullYear();
+  const baseMonth = now.getMonth(); // 0-indexed
+
+  for (let offset = -monthsBack; offset <= monthsForward; offset++) {
+    const d = new Date(baseYear, baseMonth + offset, 1);
+    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+  return months;
+}
+
+async function writeBudgetCalcs(
+  sheets: sheets_v4.Sheets,
+  sheetId: string,
+  sheetMeta: sheets_v4.Schema$Sheet[],
+  activeCategories: FlatCategory[]
+): Promise<void> {
+  const meta = findSheet(sheetMeta, "Budget_Calcs");
+  if (!meta) {
+    log("Budget_Calcs: tab not found, skipping");
+    return;
+  }
+
+  // Always clear and rewrite so month window and categories stay current.
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId: sheetId,
+    range: "Budget_Calcs",
+  });
+
+  const months = generateMonthRange(CALCS_MONTHS_BACK, CALCS_MONTHS_FORWARD);
+  const cats = activeCategories.filter((c) => c.active).sort((a, b) => a.sort_order - b.sort_order);
+  const N = cats.length; // rows per month block
+
+  if (N === 0) {
+    log("Budget_Calcs: no active categories, skipping formula rows");
+    return;
+  }
+
+  // Row 1 = headers; data starts at row 2.
+  const HEADER_ROW = 1;
+  const DATA_START = HEADER_ROW + 1;
+  const assignDataStart = BUDGET_ASSIGNMENTS_START_ROW + 1; // 509
+
+  // Build all formula rows. Row R for monthIdx m, catIdx c = DATA_START + m*N + c.
+  const rows: (string | number)[][] = [];
+  for (let m = 0; m < months.length; m++) {
+    for (let c = 0; c < N; c++) {
+      const R = DATA_START + m * N + c;
+      const month = months[m];
+      const catName = cats[c].category;
+
+      // Activity: outflows minus inflows for this category+month, excluding
+      // split child rows (parent_id non-empty) and transfer transactions.
+      const activityFormula =
+        `=SUMPRODUCT((Transactions!$K$2:$K$5000=B${R})*(TEXT(Transactions!$H$2:$H$5000,"yyyy-mm")=A${R})*(Transactions!$B$2:$B$5000="")*(Transactions!$T$2:$T$5000<>"transfer")*Transactions!$P$2:$P$5000)` +
+        `-SUMPRODUCT((Transactions!$K$2:$K$5000=B${R})*(TEXT(Transactions!$H$2:$H$5000,"yyyy-mm")=A${R})*(Transactions!$B$2:$B$5000="")*(Transactions!$T$2:$T$5000<>"transfer")*Transactions!$Q$2:$Q$5000)`;
+
+      // Assigned: sum of all assignment rows for this category+month.
+      const assignedFormula =
+        `=SUMPRODUCT((Budget!$A$${assignDataStart}:$A$5000=A${R})*(Budget!$B$${assignDataStart}:$B$5000=B${R})*Budget!$C$${assignDataStart}:$C$5000)`;
+
+      // Available: previous month's available + this month's assigned − activity.
+      // First month block has no prior row so rollover is 0.
+      const availableFormula = m === 0
+        ? `=D${R}-C${R}`
+        : `=E${R - N}+D${R}-C${R}`;
+
+      rows.push([month, catName, activityFormula, assignedFormula, availableFormula]);
+    }
+  }
+
+  // Write header row
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId,
+    range: "Budget_Calcs!A1",
+    valueInputOption: "RAW",
+    requestBody: { values: [BUDGET_CALCS_COLUMNS] },
+  });
+
+  // Write formula rows in yearly chunks to stay well within API payload limits.
+  const CHUNK_MONTHS = 12;
+  const rowsPerChunk = CHUNK_MONTHS * N;
+  for (let start = 0; start < rows.length; start += rowsPerChunk) {
+    const chunk = rows.slice(start, start + rowsPerChunk);
+    const startRow = DATA_START + start;
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: `Budget_Calcs!A${startRow}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: chunk },
+    });
+  }
+
+  // Freeze the header row.
+  const tabSheetId = meta.properties?.sheetId!;
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: sheetId,
+    requestBody: {
+      requests: [
+        {
+          updateSheetProperties: {
+            properties: {
+              sheetId: tabSheetId,
+              gridProperties: { frozenRowCount: 1 },
+            },
+            fields: "gridProperties.frozenRowCount",
+          },
+        },
+        {
+          repeatCell: {
+            range: {
+              sheetId: tabSheetId,
+              startRowIndex: 0,
+              endRowIndex: 1,
+            },
+            cell: {
+              userEnteredFormat: {
+                backgroundColor: HEADER_BG_COLOR,
+                textFormat: { foregroundColor: HEADER_FG_COLOR, bold: true },
+              },
+            },
+            fields: "userEnteredFormat(backgroundColor,textFormat)",
+          },
+        },
+      ],
+    },
+  });
+
+  log(`Budget_Calcs: wrote ${rows.length} rows (${months.length} months × ${N} categories)`);
+}
+
 // ─── Step: Write Sheet Version ────────────────────────────────────────────────
 
 async function writeSheetVersion(
@@ -1075,7 +1223,10 @@ async function main(): Promise<void> {
   // 12. Write Budget dashboard header (rows 1–5) with named ranges
   await writeBudgetDashboard(sheets, sheetId, sheetMeta);
 
-  // 13. Write sheet version
+  // 13. Write Budget_Calcs formulas (activity + available with rollover, per category per month)
+  await writeBudgetCalcs(sheets, sheetId, sheetMeta, flatCategories);
+
+  // 14. Write sheet version
   await writeSheetVersion(sheets, sheetId);
 
   console.log(
