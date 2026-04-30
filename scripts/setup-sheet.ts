@@ -993,7 +993,7 @@ async function writeBudgetDashboard(
 // ─── Step: Write Budget_Calcs Formulas ────────────────────────────────────────
 //
 // Budget_Calcs holds one row per (month, category) pair.
-// Each row has SUMPRODUCT-based formulas for Activity and Assigned, and a
+// Each row has SUMIFS-based formulas for Activity and Assigned, and a
 // rollover-aware Available formula that chains to the previous month's row.
 // The tab is cleared and rewritten on every setup run so it stays in sync
 // with any category changes and the rolling month window.
@@ -1076,13 +1076,17 @@ async function writeBudgetCalcs(
 
       // Activity: outflows minus inflows for this category+month, excluding
       // split child rows (parent_id non-empty) and transfer transactions.
+      // SUMIFS with date range bounds is much faster than SUMPRODUCT+TEXT() array expansion.
+      const monthStart = `DATEVALUE(A${R}&"-01")`;
+      const monthEnd = `EDATE(${monthStart},1)`;
+      const txBase = `Transactions!$K$2:$K$5000,B${R},Transactions!$H$2:$H$5000,">="&${monthStart},Transactions!$H$2:$H$5000,"<"&${monthEnd},Transactions!$B$2:$B$5000,"",Transactions!$T$2:$T$5000,"<>transfer"`;
       const activityFormula =
-        `=SUMPRODUCT((Transactions!$K$2:$K$5000=B${R})*(TEXT(Transactions!$H$2:$H$5000,"yyyy-mm")=A${R})*(Transactions!$B$2:$B$5000="")*(Transactions!$T$2:$T$5000<>"transfer")*Transactions!$P$2:$P$5000)` +
-        `-SUMPRODUCT((Transactions!$K$2:$K$5000=B${R})*(TEXT(Transactions!$H$2:$H$5000,"yyyy-mm")=A${R})*(Transactions!$B$2:$B$5000="")*(Transactions!$T$2:$T$5000<>"transfer")*Transactions!$Q$2:$Q$5000)`;
+        `=SUMIFS(Transactions!$P$2:$P$5000,${txBase})` +
+        `-SUMIFS(Transactions!$Q$2:$Q$5000,${txBase})`;
 
       // Assigned: sum of all assignment rows for this category+month.
       const assignedFormula =
-        `=SUMPRODUCT((Budget!$A$${assignDataStart}:$A$5000=A${R})*(Budget!$B$${assignDataStart}:$B$5000=B${R})*Budget!$C$${assignDataStart}:$C$5000)`;
+        `=SUMIFS(Budget!$C$${assignDataStart}:$C$5000,Budget!$A$${assignDataStart}:$A$5000,A${R},Budget!$B$${assignDataStart}:$B$5000,B${R})`;
 
       // Available: previous month's available + this month's assigned − activity.
       // First month block has no prior row so rollover is 0.
