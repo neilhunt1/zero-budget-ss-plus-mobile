@@ -120,11 +120,21 @@ const TEMPLATES_COLUMNS = [
   "amount",
 ];
 
+const BUDGET_LOG_COLUMNS = [
+  "timestamp",
+  "month",
+  "category",
+  "amount",
+  "change_type",
+  "note",
+];
+
 const TABS_IN_ORDER = [
   "Transactions",
   "Budget",
   "Templates",
   "Reflect",
+  "Budget_Log",
   "Transactions (BTS)",
   "Balance History (BTS)",
   "YNAB_Plan_Import",
@@ -136,7 +146,7 @@ const HEADER_BG_COLOR = { red: 0.29, green: 0.525, blue: 0.91 };
 const HEADER_FG_COLOR = { red: 1, green: 1, blue: 1 };
 
 // Sheet schema version — increment when structure changes
-const SHEET_VERSION = 3;
+const SHEET_VERSION = 4;
 
 // ─── Environment Loading ───────────────────────────────────────────────────────
 
@@ -354,6 +364,7 @@ async function writeHeaders(
     { title: "Transactions", columns: TRANSACTIONS_COLUMNS, headerRow: 1 },
     { title: "Budget", columns: BUDGET_CATEGORY_COLUMNS, headerRow: BUDGET_CATEGORIES_HEADER_ROW },
     { title: "Templates", columns: TEMPLATES_COLUMNS, headerRow: 1 },
+    { title: "Budget_Log", columns: BUDGET_LOG_COLUMNS, headerRow: 1 },
   ];
 
   const formatRequests: sheets_v4.Schema$Request[] = [];

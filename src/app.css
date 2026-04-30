@@ -137,12 +137,53 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .budget-row {
   display: flex; align-items: center; padding: 9px 16px;
   border-bottom: 1px solid var(--border); background: var(--surface);
+  width: 100%; text-align: left; font: inherit; border-left: none; border-right: none; border-top: none;
+  cursor: pointer;
 }
 .budget-row.overspent { background: #fff5f4; }
 .budget-row:hover { background: #f8faff; }
 
 .col-name { flex: 1; font-size: 14px; }
 .col-num { width: 80px; text-align: right; font-size: 14px; font-variant-numeric: tabular-nums; }
+
+/* ── Assignment bottom sheet ──────────────────────────────────────────────── */
+.assign-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.45);
+  z-index: 200; display: flex; align-items: flex-end;
+}
+.assign-sheet {
+  width: 100%; background: var(--surface); border-radius: 16px 16px 0 0;
+  padding: 12px 20px 40px; box-shadow: 0 -4px 24px rgba(0,0,0,.14);
+}
+.assign-sheet-handle {
+  width: 40px; height: 4px; border-radius: 2px; background: var(--border);
+  margin: 0 auto 20px;
+}
+.assign-sheet-title {
+  font-size: 16px; font-weight: 700; margin-bottom: 20px; text-align: center;
+}
+.assign-label {
+  display: block; font-size: 12px; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px;
+}
+.assign-input {
+  width: 100%; font-size: 28px; font-weight: 700; text-align: center;
+  border: 2px solid var(--accent); border-radius: 10px;
+  padding: 12px; background: var(--bg); color: var(--text);
+  outline: none; font-variant-numeric: tabular-nums;
+}
+.assign-input:focus { border-color: var(--accent-dark); }
+.assign-save-error {
+  margin-top: 8px; font-size: 13px; color: var(--negative); text-align: center;
+}
+.assign-sheet-actions {
+  display: flex; gap: 12px; margin-top: 20px;
+}
+.assign-sheet-actions > button { flex: 1; }
+.btn-secondary {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 24px; font-size: 15px; font-weight: 600; cursor: pointer;
+}
 
 /* ── Accounts screen ──────────────────────────────────────────────────────── */
 .accounts-total {

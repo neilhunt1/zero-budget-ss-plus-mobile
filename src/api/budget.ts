@@ -109,6 +109,24 @@ export async function upsertAssignment(
   }
 }
 
+/**
+ * Append an entry to the Budget_Log tab.
+ * @param amount — delta (new assigned minus previous), not absolute value
+ * @param change_type — 'manual' | 'template' | 'move_from:X' | 'move_to:X'
+ */
+export async function appendLogEntry(
+  client: SheetsClient,
+  month: string,
+  category: string,
+  amount: number,
+  change_type: string,
+  note = ''
+): Promise<void> {
+  await client.appendValues('Budget_Log!A2', [
+    [new Date().toISOString(), month, category, amount, change_type, note],
+  ]);
+}
+
 // ─── View builders ────────────────────────────────────────────────────────────
 
 /**
