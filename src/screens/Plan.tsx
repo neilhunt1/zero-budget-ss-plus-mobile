@@ -10,6 +10,7 @@ import {
   fetchReadyToAssign,
   upsertAssignment,
   appendLogEntry,
+  applyTemplate,
 } from '../api/budget';
 import { GroupedBudget, BudgetAssignment, BudgetCategory, CategoryWithActivity } from '../types';
 
@@ -93,11 +94,9 @@ export default function Plan() {
 
   const handleApplyTemplate = async () => {
     if (!token) return;
-    const templateCats = categories.filter((c) => c.monthly_template_amount > 0);
-    if (templateCats.length === 0) return;
+    if (categories.every((c) => c.monthly_template_amount === 0)) return;
 
-    const hasExisting = assignments.length > 0;
-    if (hasExisting) {
+    if (assignments.length > 0) {
       const ok = window.confirm('This will overwrite existing assignments. Continue?');
       if (!ok) return;
     }
@@ -105,12 +104,7 @@ export default function Plan() {
     setApplyingTemplate(true);
     try {
       const client = new SheetsClient(SHEET_ID, token);
-      for (const cat of templateCats) {
-        const existing = assignments.find((a) => a.category === cat.category);
-        await upsertAssignment(client, month, cat.category, cat.monthly_template_amount, existing, 'template');
-        const delta = cat.monthly_template_amount - (existing?.assigned ?? 0);
-        await appendLogEntry(client, month, cat.category, delta, 'template');
-      }
+      await applyTemplate(client, month, categories, assignments);
       await load();
     } catch (e) {
       setError((e as Error).message);

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fetchBudgetCategories, fetchMonthAssignments, upsertAssignment, fetchReadyToAssign, appendLogEntry, fetchCategoryCalcs } from '../../src/api/budget';
+import { fetchBudgetCategories, fetchMonthAssignments, upsertAssignment, fetchReadyToAssign, appendLogEntry, fetchCategoryCalcs, applyTemplate } from '../../src/api/budget';
+import type { BudgetCategory, BudgetAssignment } from '../../src/types';
 import type { SheetsClient } from '../../src/api/client';
 
 // ─── Mock helpers ─────────────────────────────────────────────────────────────
@@ -9,9 +10,35 @@ function mockClient(values: string[][]): SheetsClient {
     getValues: vi.fn().mockResolvedValue({ values }),
     updateValues: vi.fn().mockResolvedValue(undefined),
     appendValues: vi.fn().mockResolvedValue(undefined),
+    batchUpdateValues: vi.fn().mockResolvedValue(undefined),
     batchUpdate: vi.fn().mockResolvedValue(undefined),
     updateToken: vi.fn(),
   } as unknown as SheetsClient;
+}
+
+function makeCategory(overrides: Partial<BudgetCategory> = {}): BudgetCategory {
+  return {
+    category_group: 'Food',
+    category_subgroup: '',
+    category: 'Groceries',
+    category_type: 'fluid',
+    monthly_template_amount: 500,
+    sort_order: 1,
+    active: true,
+    _rowIndex: 7,
+    ...overrides,
+  };
+}
+
+function makeAssignment(overrides: Partial<BudgetAssignment> = {}): BudgetAssignment {
+  return {
+    month: '2026-04',
+    category: 'Groceries',
+    assigned: 200,
+    source: 'manual',
+    _rowIndex: 509,
+    ...overrides,
+  };
 }
 
 // Column order: category_group, category_subgroup, category, category_type,
@@ -310,5 +337,90 @@ describe('fetchCategoryCalcs', () => {
     ]);
     const result = await fetchCategoryCalcs(client, '2025-04');
     expect(result.size).toBe(0);
+  });
+});
+
+// ─── applyTemplate ────────────────────────────────────────────────────────────
+
+describe('applyTemplate', () => {
+  it('does nothing when no categories have a template amount', async () => {
+    const client = mockClient([]);
+    await applyTemplate(client, '2026-04', [makeCategory({ monthly_template_amount: 0 })], []);
+    expect(client.batchUpdateValues).not.toHaveBeenCalled();
+    expect(client.appendValues).not.toHaveBeenCalled();
+  });
+
+  it('appends new rows for categories with no existing assignment', async () => {
+    const client = mockClient([]);
+    await applyTemplate(client, '2026-04', [makeCategory()], []);
+    expect(client.appendValues).toHaveBeenCalledWith(
+      expect.stringContaining('Budget!'),
+      [['2026-04', 'Groceries', 500, 'template']]
+    );
+    expect(client.batchUpdateValues).not.toHaveBeenCalled();
+  });
+
+  it('uses batchUpdateValues for categories with an existing assignment', async () => {
+    const client = mockClient([]);
+    const existing = makeAssignment({ _rowIndex: 510 });
+    await applyTemplate(client, '2026-04', [makeCategory()], [existing]);
+    expect(client.batchUpdateValues).toHaveBeenCalledWith([
+      {
+        range: 'Budget!A510:D510',
+        values: [['2026-04', 'Groceries', 500, 'template']],
+      },
+    ]);
+    expect(client.appendValues).not.toHaveBeenCalledWith(
+      expect.stringContaining('Budget!'),
+      expect.anything()
+    );
+  });
+
+  it('batches new and updated assignments in the same call', async () => {
+    const client = mockClient([]);
+    const cats = [
+      makeCategory({ category: 'Groceries', monthly_template_amount: 500 }),
+      makeCategory({ category: 'Gas', monthly_template_amount: 100 }),
+    ];
+    const existing = makeAssignment({ category: 'Groceries', _rowIndex: 510 });
+    await applyTemplate(client, '2026-04', cats, [existing]);
+
+    expect(client.batchUpdateValues).toHaveBeenCalledWith([
+      { range: 'Budget!A510:D510', values: [['2026-04', 'Groceries', 500, 'template']] },
+    ]);
+    expect(client.appendValues).toHaveBeenCalledWith(
+      expect.stringContaining('Budget!'),
+      [['2026-04', 'Gas', 100, 'template']]
+    );
+  });
+
+  it('appends all log entries in a single call', async () => {
+    const client = mockClient([]);
+    const cats = [
+      makeCategory({ category: 'Groceries', monthly_template_amount: 500 }),
+      makeCategory({ category: 'Gas', monthly_template_amount: 100 }),
+    ];
+    await applyTemplate(client, '2026-04', cats, []);
+
+    const logCall = (client.appendValues as ReturnType<typeof vi.fn>).mock.calls.find(
+      ([range]: [string]) => range.startsWith('Budget_Log')
+    );
+    expect(logCall).toBeDefined();
+    expect(logCall[1]).toHaveLength(2);
+  });
+
+  it('skips categories with template amount of 0', async () => {
+    const client = mockClient([]);
+    const cats = [
+      makeCategory({ category: 'Groceries', monthly_template_amount: 500 }),
+      makeCategory({ category: 'Savings', monthly_template_amount: 0 }),
+    ];
+    await applyTemplate(client, '2026-04', cats, []);
+
+    const budgetCall = (client.appendValues as ReturnType<typeof vi.fn>).mock.calls.find(
+      ([range]: [string]) => range.startsWith('Budget!')
+    );
+    expect(budgetCall[1]).toHaveLength(1);
+    expect(budgetCall[1][0][1]).toBe('Groceries');
   });
 });
