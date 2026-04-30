@@ -10,7 +10,14 @@
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import { google } from 'googleapis';
-import * as fs from 'fs';
+import * as dotenv from 'dotenv';
+
+dotenv.config({ path: '.env.development' });
+
+// GOOGLE_SERVICE_ACCOUNT_KEY_PATH is the local dev alias for the key file.
+if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  process.env.GOOGLE_APPLICATION_CREDENTIALS = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH;
+}
 
 // Skip all tests if credentials are not available
 const hasCredentials =
