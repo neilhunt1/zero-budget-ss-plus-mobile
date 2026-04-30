@@ -1023,12 +1023,6 @@ async function writeBudgetCalcs(
     return;
   }
 
-  // Always clear and rewrite so month window and categories stay current.
-  await sheets.spreadsheets.values.clear({
-    spreadsheetId: sheetId,
-    range: "Budget_Calcs",
-  });
-
   const months = generateMonthRange(CALCS_MONTHS_BACK, CALCS_MONTHS_FORWARD);
   const cats = activeCategories.filter((c) => c.active).sort((a, b) => a.sort_order - b.sort_order);
   const N = cats.length; // rows per month block
@@ -1041,6 +1035,35 @@ async function writeBudgetCalcs(
   // Row 1 = headers; data starts at row 2.
   const HEADER_ROW = 1;
   const DATA_START = HEADER_ROW + 1;
+
+  // Ensure the grid is large enough before writing. New tabs default to 1000
+  // rows which is often insufficient for months × categories.
+  const requiredRows = DATA_START + months.length * N;
+  const tabSheetId = meta.properties?.sheetId!;
+  const currentRowCount = meta.properties?.gridProperties?.rowCount ?? 0;
+  if (currentRowCount < requiredRows) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: {
+        requests: [{
+          updateSheetProperties: {
+            properties: {
+              sheetId: tabSheetId,
+              gridProperties: { rowCount: requiredRows },
+            },
+            fields: "gridProperties.rowCount",
+          },
+        }],
+      },
+    });
+    log(`Budget_Calcs: expanded grid to ${requiredRows} rows`);
+  }
+
+  // Always clear and rewrite so month window and categories stay current.
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId: sheetId,
+    range: "Budget_Calcs",
+  });
   const assignDataStart = BUDGET_ASSIGNMENTS_START_ROW + 1; // 509
 
   // Build all formula rows. Row R for monthIdx m, catIdx c = DATA_START + m*N + c.
@@ -1094,7 +1117,6 @@ async function writeBudgetCalcs(
   }
 
   // Freeze the header row.
-  const tabSheetId = meta.properties?.sheetId!;
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId: sheetId,
     requestBody: {
