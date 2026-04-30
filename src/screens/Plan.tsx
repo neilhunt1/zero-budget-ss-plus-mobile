@@ -11,7 +11,7 @@ import {
   upsertAssignment,
   appendLogEntry,
 } from '../api/budget';
-import { GroupedBudget, BudgetAssignment, CategoryWithActivity } from '../types';
+import { GroupedBudget, BudgetAssignment, BudgetCategory, CategoryWithActivity } from '../types';
 
 const SHEET_ID = import.meta.env.VITE_GOOGLE_SHEET_ID as string;
 
@@ -46,6 +46,8 @@ export default function Plan() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editState, setEditState] = useState<EditState | null>(null);
+  const [categories, setCategories] = useState<BudgetCategory[]>([]);
+  const [applyingTemplate, setApplyingTemplate] = useState(false);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -59,6 +61,7 @@ export default function Plan() {
         fetchMonthAssignments(client, month),
         fetchCategoryCalcs(client, month),
       ]);
+      setCategories(cats);
       setAssignments(rawAssignments);
       setGroups(buildGroupedBudget(cats, rawAssignments, calcs));
       setReadyToAssign(await fetchReadyToAssign(client));
@@ -87,6 +90,34 @@ export default function Plan() {
   };
 
   const handleCancel = () => setEditState(null);
+
+  const handleApplyTemplate = async () => {
+    if (!token) return;
+    const templateCats = categories.filter((c) => c.monthly_template_amount > 0);
+    if (templateCats.length === 0) return;
+
+    const hasExisting = assignments.length > 0;
+    if (hasExisting) {
+      const ok = window.confirm('This will overwrite existing assignments. Continue?');
+      if (!ok) return;
+    }
+
+    setApplyingTemplate(true);
+    try {
+      const client = new SheetsClient(SHEET_ID, token);
+      for (const cat of templateCats) {
+        const existing = assignments.find((a) => a.category === cat.category);
+        await upsertAssignment(client, month, cat.category, cat.monthly_template_amount, existing, 'template');
+        const delta = cat.monthly_template_amount - (existing?.assigned ?? 0);
+        await appendLogEntry(client, month, cat.category, delta, 'template');
+      }
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setApplyingTemplate(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!editState || !token) return;
@@ -117,6 +148,14 @@ export default function Plan() {
           onChange={(e) => setMonth(e.target.value)}
           className="month-picker"
         />
+        <button
+          type="button"
+          className="btn-secondary apply-template-btn"
+          onClick={handleApplyTemplate}
+          disabled={applyingTemplate || loading || categories.every((c) => c.monthly_template_amount === 0)}
+        >
+          {applyingTemplate ? 'Applying…' : 'Apply Template'}
+        </button>
       </header>
 
       <div className={`ready-to-assign${readyToAssign < 0 ? ' negative-bg' : ''}`}>

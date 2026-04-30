@@ -251,3 +251,159 @@ describe('Plan screen — assign money', () => {
     });
   });
 });
+
+describe('Plan screen — apply template', () => {
+  function makeCatWithTemplate(overrides: Partial<CategoryWithActivity> = {}): CategoryWithActivity {
+    return {
+      category_group: 'Food',
+      category_subgroup: '',
+      category: 'Groceries',
+      category_type: 'fluid',
+      monthly_template_amount: 500,
+      sort_order: 1,
+      active: true,
+      _rowIndex: 7,
+      assigned: 0,
+      activity: 0,
+      available: 0,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFetchBudgetCategories.mockResolvedValue([]);
+    mockFetchMonthAssignments.mockResolvedValue([]);
+    mockFetchCategoryCalcs.mockResolvedValue(new Map());
+    mockFetchReadyToAssign.mockResolvedValue(0);
+    mockBuildGroupedBudget.mockReturnValue(makeGroupedBudget([makeCatWithTemplate()]));
+    mockUpsertAssignment.mockResolvedValue(undefined);
+    mockAppendLogEntry.mockResolvedValue(undefined);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  });
+
+  it('renders the Apply Template button', async () => {
+    mockFetchBudgetCategories.mockResolvedValue([makeCatWithTemplate()]);
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+    expect(await screen.findByRole('button', { name: /Apply Template/i })).toBeInTheDocument();
+  });
+
+  it('button is disabled when no categories have a template amount', async () => {
+    mockFetchBudgetCategories.mockResolvedValue([makeCatWithTemplate({ monthly_template_amount: 0 })]);
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+    const btn = await screen.findByRole('button', { name: /Apply Template/i });
+    await waitFor(() => expect(btn).toBeDisabled());
+  });
+
+  it('calls upsertAssignment with template source for each category with template > 0', async () => {
+    mockFetchBudgetCategories.mockResolvedValue([
+      makeCatWithTemplate({ category: 'Groceries', monthly_template_amount: 500 }),
+      makeCatWithTemplate({ category: 'Gas', monthly_template_amount: 0 }),
+    ]);
+    mockFetchMonthAssignments.mockResolvedValue([]);
+
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const btn = await screen.findByRole('button', { name: /Apply Template/i });
+    await waitFor(() => expect(btn).not.toBeDisabled());
+    fireEvent.click(btn);
+
+    await waitFor(() => expect(mockUpsertAssignment).toHaveBeenCalledTimes(1));
+    expect(mockUpsertAssignment).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      'Groceries',
+      500,
+      undefined,
+      'template'
+    );
+  });
+
+  it('calls appendLogEntry with template change_type and correct delta', async () => {
+    mockFetchBudgetCategories.mockResolvedValue([
+      makeCatWithTemplate({ category: 'Groceries', monthly_template_amount: 500 }),
+    ]);
+    mockFetchMonthAssignments.mockResolvedValue([]);
+
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const btn = await screen.findByRole('button', { name: /Apply Template/i });
+    await waitFor(() => expect(btn).not.toBeDisabled());
+    fireEvent.click(btn);
+
+    await waitFor(() => expect(mockAppendLogEntry).toHaveBeenCalled());
+    expect(mockAppendLogEntry).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      'Groceries',
+      500,
+      'template'
+    );
+  });
+
+  it('shows confirm dialog when assignments already exist, and cancels if rejected', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    mockFetchBudgetCategories.mockResolvedValue([
+      makeCatWithTemplate({ monthly_template_amount: 500 }),
+    ]);
+    mockFetchMonthAssignments.mockResolvedValue([makeAssignment(200)]);
+
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const btn = await screen.findByRole('button', { name: /Apply Template/i });
+    await waitFor(() => expect(btn).not.toBeDisabled());
+    fireEvent.click(btn);
+
+    expect(window.confirm).toHaveBeenCalled();
+    expect(mockUpsertAssignment).not.toHaveBeenCalled();
+  });
+
+  it('passes existing assignment row to upsertAssignment when overwriting', async () => {
+    const existing = makeAssignment(200);
+    mockFetchBudgetCategories.mockResolvedValue([
+      makeCatWithTemplate({ category: 'Groceries', monthly_template_amount: 500 }),
+    ]);
+    mockFetchMonthAssignments.mockResolvedValue([existing]);
+
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const btn = await screen.findByRole('button', { name: /Apply Template/i });
+    await waitFor(() => expect(btn).not.toBeDisabled());
+    fireEvent.click(btn);
+
+    await waitFor(() => expect(mockUpsertAssignment).toHaveBeenCalled());
+    expect(mockUpsertAssignment).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      'Groceries',
+      500,
+      existing,
+      'template'
+    );
+  });
+
+  it('reloads data after applying', async () => {
+    mockFetchBudgetCategories.mockResolvedValue([
+      makeCatWithTemplate({ monthly_template_amount: 500 }),
+    ]);
+    mockFetchMonthAssignments.mockResolvedValue([]);
+
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const btn = await screen.findByRole('button', { name: /Apply Template/i });
+    await waitFor(() => expect(btn).not.toBeDisabled());
+    const callsBefore = mockFetchBudgetCategories.mock.calls.length;
+    fireEvent.click(btn);
+
+    await waitFor(() =>
+      expect(mockFetchBudgetCategories.mock.calls.length).toBeGreaterThan(callsBefore)
+    );
+  });
+});
