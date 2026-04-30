@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildGroupedBudget } from '../../src/api/budget';
-import { BudgetCategory, BudgetAssignment } from '../../src/types/index';
+import { BudgetCategory, BudgetAssignment, CategoryCalcs } from '../../src/types/index';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -19,7 +19,11 @@ function makeCategory(overrides: Partial<BudgetCategory> = {}): BudgetCategory {
 }
 
 function makeAssignment(category: string, assigned: number, month = '2025-04'): BudgetAssignment {
-  return { month, category, assigned, _rowIndex: 502 };
+  return { month, category, assigned, source: 'manual', _rowIndex: 502 };
+}
+
+function makeCalcs(activity: number, available: number): CategoryCalcs {
+  return { activity, available };
 }
 
 // ─── buildGroupedBudget ───────────────────────────────────────────────────────
@@ -36,20 +40,20 @@ describe('buildGroupedBudget', () => {
     expect(result.map((g) => g.groupName)).toContain('Transportation');
   });
 
-  it('computes available = assigned − activity', () => {
+  it('uses pre-calculated activity and available from calcMap', () => {
     const categories = [makeCategory({ category: 'Groceries' })];
     const assignments = [makeAssignment('Groceries', 500)];
-    const activity = new Map([['Groceries', 320]]);
+    const calcMap = new Map([['Groceries', makeCalcs(320, 230)]]);
 
-    const result = buildGroupedBudget(categories, assignments, activity);
+    const result = buildGroupedBudget(categories, assignments, calcMap);
     const groceries = result[0].subgroups[0].categories[0];
 
     expect(groceries.assigned).toBe(500);
     expect(groceries.activity).toBe(320);
-    expect(groceries.available).toBe(180);
+    expect(groceries.available).toBe(230); // pre-calculated, includes rollover
   });
 
-  it('defaults assigned and activity to 0 when not provided', () => {
+  it('defaults activity and available to 0 when category not in calcMap', () => {
     const categories = [makeCategory({ category: 'Groceries' })];
     const result = buildGroupedBudget(categories, [], new Map());
     const cat = result[0].subgroups[0].categories[0];
@@ -65,9 +69,12 @@ describe('buildGroupedBudget', () => {
       makeCategory({ category: 'Dining Out', sort_order: 2 }),
     ];
     const assignments = [makeAssignment('Groceries', 500), makeAssignment('Dining Out', 200)];
-    const activity = new Map([['Groceries', 400], ['Dining Out', 150]]);
+    const calcMap = new Map([
+      ['Groceries', makeCalcs(400, 100)],
+      ['Dining Out', makeCalcs(150, 50)],
+    ]);
 
-    const [group] = buildGroupedBudget(categories, assignments, activity);
+    const [group] = buildGroupedBudget(categories, assignments, calcMap);
 
     expect(group.totalAssigned).toBe(700);
     expect(group.totalActivity).toBe(550);
@@ -98,15 +105,27 @@ describe('buildGroupedBudget', () => {
     expect(subgroupNames).toContain('Amara Activities');
   });
 
-  it('handles overspent categories (available goes negative)', () => {
+  it('handles overspent categories (available goes negative from calcMap)', () => {
     const categories = [makeCategory({ category: 'Dining Out' })];
     const assignments = [makeAssignment('Dining Out', 100)];
-    const activity = new Map([['Dining Out', 175]]);
+    const calcMap = new Map([['Dining Out', makeCalcs(175, -75)]]);
 
-    const result = buildGroupedBudget(categories, assignments, activity);
+    const result = buildGroupedBudget(categories, assignments, calcMap);
     const cat = result[0].subgroups[0].categories[0];
 
     expect(cat.available).toBe(-75);
     expect(result[0].totalAvailable).toBe(-75);
+  });
+
+  it('available reflects rollover from calcMap even if assigned is 0', () => {
+    // Simulates a category that had $50 left last month but nothing assigned this month
+    const categories = [makeCategory({ category: 'Haircuts' })];
+    const calcMap = new Map([['Haircuts', makeCalcs(0, 50)]]);
+
+    const result = buildGroupedBudget(categories, [], calcMap);
+    const cat = result[0].subgroups[0].categories[0];
+
+    expect(cat.assigned).toBe(0);
+    expect(cat.available).toBe(50); // rollover from prior month
   });
 });

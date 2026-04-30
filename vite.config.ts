@@ -15,7 +15,7 @@ export default defineConfig({
     environment: 'node',
     environmentMatchGlobs: [['tests/unit/**/*.test.tsx', 'jsdom']],
     setupFiles: ['./tests/setup.ts'],
-    include: ['tests/unit/**/*.test.{ts,tsx}'],
+    include: ['tests/**/*.test.{ts,tsx}'],
     // Emit JUnit XML so the GitHub Actions Test Reporter can annotate PRs.
     reporters: ['verbose', 'junit'],
     outputFile: { junit: 'test-results/junit.xml' },

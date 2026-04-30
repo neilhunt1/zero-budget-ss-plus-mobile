@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fetchBudgetCategories, fetchMonthAssignments, upsertAssignment, fetchReadyToAssign, appendLogEntry } from '../../src/api/budget';
+import { fetchBudgetCategories, fetchMonthAssignments, upsertAssignment, fetchReadyToAssign, appendLogEntry, fetchCategoryCalcs } from '../../src/api/budget';
 import type { SheetsClient } from '../../src/api/client';
 
 // ─── Mock helpers ─────────────────────────────────────────────────────────────
@@ -230,5 +230,85 @@ describe('appendLogEntry', () => {
     await appendLogEntry(client, '2026-04', 'Dining Out', -200, 'manual');
     const [[, [row]]] = (client.appendValues as ReturnType<typeof vi.fn>).mock.calls;
     expect(row[3]).toBe(-200);
+  });
+});
+
+// ─── fetchCategoryCalcs ───────────────────────────────────────────────────────
+
+// Budget_Calcs columns: month, category, activity, assigned, available
+function calcsRow(month: string, category: string, activity: string, assigned: string, available: string): string[] {
+  return [month, category, activity, assigned, available];
+}
+
+describe('fetchCategoryCalcs', () => {
+  it('returns empty map when sheet has no data rows', async () => {
+    const client = mockClient([]);
+    expect((await fetchCategoryCalcs(client, '2025-04')).size).toBe(0);
+  });
+
+  it('skips the header row and filters by month', async () => {
+    const client = mockClient([
+      ['month', 'category', 'activity', 'assigned', 'available'], // header
+      calcsRow('2025-03', 'Groceries', '300', '400', '100'),
+      calcsRow('2025-04', 'Groceries', '320', '500', '180'),
+      calcsRow('2025-04', 'Dining Out', '150', '200', '50'),
+    ]);
+    const result = await fetchCategoryCalcs(client, '2025-04');
+    expect(result.size).toBe(2);
+    expect(result.has('Groceries')).toBe(true);
+    expect(result.has('Dining Out')).toBe(true);
+    expect(result.has('Groceries')).toBe(true);
+    const groceries = result.get('Groceries')!;
+    expect(groceries.activity).toBe(320);
+    expect(groceries.available).toBe(180);
+  });
+
+  it('parses activity and available as floats', async () => {
+    const client = mockClient([
+      ['month', 'category', 'activity', 'assigned', 'available'],
+      calcsRow('2025-04', 'Gas', '45.75', '100', '54.25'),
+    ]);
+    const result = await fetchCategoryCalcs(client, '2025-04');
+    const gas = result.get('Gas')!;
+    expect(gas.activity).toBe(45.75);
+    expect(gas.available).toBe(54.25);
+  });
+
+  it('defaults activity and available to 0 when values are empty', async () => {
+    const client = mockClient([
+      ['month', 'category', 'activity', 'assigned', 'available'],
+      calcsRow('2025-04', 'Haircuts', '', '', ''),
+    ]);
+    const result = await fetchCategoryCalcs(client, '2025-04');
+    const haircuts = result.get('Haircuts')!;
+    expect(haircuts.activity).toBe(0);
+    expect(haircuts.available).toBe(0);
+  });
+
+  it('handles negative available (overspent with rollover)', async () => {
+    const client = mockClient([
+      ['month', 'category', 'activity', 'assigned', 'available'],
+      calcsRow('2025-04', 'Dining Out', '250', '100', '-150'),
+    ]);
+    const result = await fetchCategoryCalcs(client, '2025-04');
+    expect(result.get('Dining Out')!.available).toBe(-150);
+  });
+
+  it('returns empty map when no rows match the month', async () => {
+    const client = mockClient([
+      ['month', 'category', 'activity', 'assigned', 'available'],
+      calcsRow('2025-03', 'Groceries', '300', '400', '100'),
+    ]);
+    const result = await fetchCategoryCalcs(client, '2025-04');
+    expect(result.size).toBe(0);
+  });
+
+  it('skips rows with an empty category', async () => {
+    const client = mockClient([
+      ['month', 'category', 'activity', 'assigned', 'available'],
+      calcsRow('2025-04', '', '100', '200', '100'),
+    ]);
+    const result = await fetchCategoryCalcs(client, '2025-04');
+    expect(result.size).toBe(0);
   });
 });

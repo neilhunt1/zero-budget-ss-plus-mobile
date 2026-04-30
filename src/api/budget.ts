@@ -1,5 +1,5 @@
 import { SheetsClient } from './client';
-import { BudgetCategory, BudgetAssignment, CategoryType, CategoryWithActivity, GroupedBudget } from '../types';
+import { BudgetCategory, BudgetAssignment, CategoryType, CategoryWithActivity, GroupedBudget, CategoryCalcs } from '../types';
 
 // Column order must match scripts/setup-sheet.ts BUDGET_CATEGORY_COLUMNS exactly.
 const CATEGORY_COLS = [
@@ -127,24 +127,51 @@ export async function appendLogEntry(
   ]);
 }
 
+/**
+ * Fetch pre-calculated activity and available per category for the given month
+ * from the Budget_Calcs tab. Available already includes rollover from prior months.
+ * @param month — "YYYY-MM" format
+ */
+export async function fetchCategoryCalcs(
+  client: SheetsClient,
+  month: string
+): Promise<Map<string, CategoryCalcs>> {
+  const res = await client.getValues('Budget_Calcs!A:E');
+  const rows = res.values ?? [];
+  const map = new Map<string, CategoryCalcs>();
+  // Row 0 is headers; skip it
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if ((row[0] ?? '') !== month) continue;
+    const category = row[1] ?? '';
+    if (!category) continue;
+    map.set(category, {
+      activity: parseFloat(row[2]) || 0,
+      available: parseFloat(row[4]) || 0,
+    });
+  }
+  return map;
+}
+
 // ─── View builders ────────────────────────────────────────────────────────────
 
 /**
- * Merge categories, assignments, and activity into a grouped budget view.
+ * Merge categories, assignments, and pre-calculated calcs into a grouped budget view.
+ * Activity and available come from Budget_Calcs (sheet-computed, includes rollover).
  * This is the primary data structure consumed by the Plan screen.
  */
 export function buildGroupedBudget(
   categories: BudgetCategory[],
   assignments: BudgetAssignment[],
-  activityMap: Map<string, number>
+  calcMap: Map<string, CategoryCalcs>
 ): GroupedBudget[] {
   const assignMap = new Map(assignments.map((a) => [a.category, a.assigned]));
 
-  // Enrich categories with computed fields
+  // Enrich categories with sheet-computed fields
   const enriched: CategoryWithActivity[] = categories.map((cat) => {
     const assigned = assignMap.get(cat.category) ?? 0;
-    const activity = activityMap.get(cat.category) ?? 0;
-    return { ...cat, assigned, activity, available: assigned - activity };
+    const calcs = calcMap.get(cat.category) ?? { activity: 0, available: 0 };
+    return { ...cat, assigned, activity: calcs.activity, available: calcs.available };
   });
 
   // Group → subgroup → categories
