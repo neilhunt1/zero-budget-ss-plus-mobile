@@ -11,6 +11,8 @@ import {
   upsertAssignment,
   appendLogEntry,
   applyTemplate,
+  batchUpsertAssignments,
+  batchAppendLogEntries,
 } from '../api/budget';
 import { GroupedBudget, BudgetAssignment, BudgetCategory, CategoryWithActivity } from '../types';
 
@@ -188,10 +190,14 @@ export default function Plan() {
     setMoveMoneyState((prev) => (prev ? { ...prev, saving: true, saveError: null } : null));
     try {
       const client = new SheetsClient(SHEET_ID, token);
-      await upsertAssignment(client, month, sourceCat.category, sourceCat.assigned - amount, sourceExisting);
-      await upsertAssignment(client, month, destCat.category, destCat.assigned + amount, destExisting);
-      await appendLogEntry(client, month, sourceCat.category, -amount, `move_from:${destCat.category}`);
-      await appendLogEntry(client, month, destCat.category, amount, `move_to:${sourceCat.category}`);
+      await batchUpsertAssignments(client, month, [
+        { category: sourceCat.category, assigned: sourceCat.assigned - amount, existing: sourceExisting },
+        { category: destCat.category, assigned: destCat.assigned + amount, existing: destExisting },
+      ]);
+      await batchAppendLogEntries(client, [
+        { month, category: sourceCat.category, amount: -amount, change_type: `move_from:${destCat.category}` },
+        { month, category: destCat.category, amount, change_type: `move_to:${sourceCat.category}` },
+      ]);
       setMoveMoneyState(null);
       await load();
     } catch (e) {

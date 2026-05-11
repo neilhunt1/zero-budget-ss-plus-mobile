@@ -110,6 +110,34 @@ export async function upsertAssignment(
 }
 
 /**
+ * Upsert multiple assignments in one or two API calls (batch update for existing rows,
+ * single append for new rows). Mirrors the pattern used by applyTemplate.
+ */
+export async function batchUpsertAssignments(
+  client: SheetsClient,
+  month: string,
+  entries: Array<{ category: string; assigned: number; existing?: BudgetAssignment; source?: string }>
+): Promise<void> {
+  const updateData: { range: string; values: unknown[][] }[] = [];
+  const newRows: unknown[][] = [];
+
+  for (const entry of entries) {
+    const source = entry.source ?? 'manual';
+    if (entry.existing) {
+      updateData.push({
+        range: `Budget!A${entry.existing._rowIndex}:D${entry.existing._rowIndex}`,
+        values: [[month, entry.category, entry.assigned, source]],
+      });
+    } else {
+      newRows.push([month, entry.category, entry.assigned, source]);
+    }
+  }
+
+  if (updateData.length > 0) await client.batchUpdateValues(updateData);
+  if (newRows.length > 0) await client.appendValues(`Budget!A${ASSIGNMENTS_START_ROW + 1}`, newRows);
+}
+
+/**
  * Append an entry to the Budget_Log tab.
  * @param amount — delta (new assigned minus previous), not absolute value
  * @param change_type — 'manual' | 'template' | 'move_from:X' | 'move_to:X'
@@ -125,6 +153,19 @@ export async function appendLogEntry(
   await client.appendValues('Budget_Log!A2', [
     [new Date().toISOString(), month, category, amount, change_type, note],
   ]);
+}
+
+/**
+ * Append multiple log entries to Budget_Log in a single API call.
+ * All entries share the same timestamp.
+ */
+export async function batchAppendLogEntries(
+  client: SheetsClient,
+  entries: Array<{ month: string; category: string; amount: number; change_type: string; note?: string }>
+): Promise<void> {
+  const now = new Date().toISOString();
+  const rows = entries.map((e) => [now, e.month, e.category, e.amount, e.change_type, e.note ?? '']);
+  await client.appendValues('Budget_Log!A2', rows);
 }
 
 /**

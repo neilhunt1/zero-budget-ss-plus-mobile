@@ -25,6 +25,8 @@ const mockBuildGroupedBudget = vi.fn().mockReturnValue([]);
 const mockUpsertAssignment = vi.fn().mockResolvedValue(undefined);
 const mockAppendLogEntry = vi.fn().mockResolvedValue(undefined);
 const mockApplyTemplate = vi.fn().mockResolvedValue(undefined);
+const mockBatchUpsertAssignments = vi.fn().mockResolvedValue(undefined);
+const mockBatchAppendLogEntries = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../../src/api/budget', () => ({
   fetchBudgetCategories: (...args: unknown[]) => mockFetchBudgetCategories(...args),
@@ -35,6 +37,8 @@ vi.mock('../../src/api/budget', () => ({
   upsertAssignment: (...args: unknown[]) => mockUpsertAssignment(...args),
   appendLogEntry: (...args: unknown[]) => mockAppendLogEntry(...args),
   applyTemplate: (...args: unknown[]) => mockApplyTemplate(...args),
+  batchUpsertAssignments: (...args: unknown[]) => mockBatchUpsertAssignments(...args),
+  batchAppendLogEntries: (...args: unknown[]) => mockBatchAppendLogEntries(...args),
 }));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -394,6 +398,8 @@ describe('Plan screen — move money', () => {
     mockBuildGroupedBudget.mockReturnValue(makeGroupedBudgetTwo(destCat, sourceCat));
     mockUpsertAssignment.mockResolvedValue(undefined);
     mockAppendLogEntry.mockResolvedValue(undefined);
+    mockBatchUpsertAssignments.mockResolvedValue(undefined);
+    mockBatchAppendLogEntries.mockResolvedValue(undefined);
   });
 
   it('shows Move Money button in assignment sheet', async () => {
@@ -515,7 +521,7 @@ describe('Plan screen — move money', () => {
     expect(screen.getByRole('spinbutton')).toHaveValue(75);
   });
 
-  it('confirm calls upsertAssignment twice — source decreases, dest increases', async () => {
+  it('confirm calls batchUpsertAssignments with source decrease and dest increase', async () => {
     const sourceAssignment: BudgetAssignment = {
       month: '2026-04', category: 'Dining Out', assigned: 200, source: 'manual', _rowIndex: 510,
     };
@@ -532,16 +538,15 @@ describe('Plan screen — move money', () => {
     fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '50' } });
     fireEvent.click(screen.getByRole('button', { name: /Confirm/i }));
 
-    await waitFor(() => expect(mockUpsertAssignment).toHaveBeenCalledTimes(2));
-
-    const calls = mockUpsertAssignment.mock.calls;
+    await waitFor(() => expect(mockBatchUpsertAssignments).toHaveBeenCalledTimes(1));
+    const [, , entries] = mockBatchUpsertAssignments.mock.calls[0];
     // Source: Dining Out assigned 200 - 50 = 150
-    expect(calls.some((c) => c[2] === 'Dining Out' && c[3] === 150)).toBe(true);
+    expect(entries.some((e: { category: string; assigned: number }) => e.category === 'Dining Out' && e.assigned === 150)).toBe(true);
     // Dest: Groceries assigned 400 + 50 = 450
-    expect(calls.some((c) => c[2] === 'Groceries' && c[3] === 450)).toBe(true);
+    expect(entries.some((e: { category: string; assigned: number }) => e.category === 'Groceries' && e.assigned === 450)).toBe(true);
   });
 
-  it('confirm calls appendLogEntry with move_from and move_to change types', async () => {
+  it('confirm calls batchAppendLogEntries once with move_from and move_to entries', async () => {
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
 
@@ -553,11 +558,10 @@ describe('Plan screen — move money', () => {
     fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '30' } });
     fireEvent.click(screen.getByRole('button', { name: /Confirm/i }));
 
-    await waitFor(() => expect(mockAppendLogEntry).toHaveBeenCalledTimes(2));
-
-    const logCalls = mockAppendLogEntry.mock.calls;
-    expect(logCalls.some((c) => c[4]?.startsWith('move_from:'))).toBe(true);
-    expect(logCalls.some((c) => c[4]?.startsWith('move_to:'))).toBe(true);
+    await waitFor(() => expect(mockBatchAppendLogEntries).toHaveBeenCalledTimes(1));
+    const [, entries] = mockBatchAppendLogEntries.mock.calls[0];
+    expect(entries.some((e: { change_type: string }) => e.change_type.startsWith('move_from:'))).toBe(true);
+    expect(entries.some((e: { change_type: string }) => e.change_type.startsWith('move_to:'))).toBe(true);
   });
 
   it('cancel in picker closes the move money flow', async () => {
