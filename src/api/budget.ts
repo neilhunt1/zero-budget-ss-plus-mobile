@@ -153,6 +153,48 @@ export async function fetchCategoryCalcs(
   return map;
 }
 
+/**
+ * Apply monthly template amounts for all categories that have one.
+ * Batches all writes into at most 3 API calls: one batchUpdateValues for
+ * in-place updates, one appendValues for new rows, one appendValues for logs.
+ */
+export async function applyTemplate(
+  client: SheetsClient,
+  month: string,
+  categories: BudgetCategory[],
+  existingAssignments: BudgetAssignment[]
+): Promise<void> {
+  const templateCats = categories.filter((c) => c.monthly_template_amount > 0);
+  if (templateCats.length === 0) return;
+
+  const assignMap = new Map(existingAssignments.map((a) => [a.category, a]));
+  const updateData: { range: string; values: unknown[][] }[] = [];
+  const newRows: unknown[][] = [];
+  const logRows: unknown[][] = [];
+  const now = new Date().toISOString();
+
+  for (const cat of templateCats) {
+    const existing = assignMap.get(cat.category);
+    const amount = cat.monthly_template_amount;
+    const delta = amount - (existing?.assigned ?? 0);
+
+    if (existing) {
+      updateData.push({
+        range: `Budget!A${existing._rowIndex}:D${existing._rowIndex}`,
+        values: [[month, cat.category, amount, 'template']],
+      });
+    } else {
+      newRows.push([month, cat.category, amount, 'template']);
+    }
+
+    logRows.push([now, month, cat.category, delta, 'template', '']);
+  }
+
+  if (updateData.length > 0) await client.batchUpdateValues(updateData);
+  if (newRows.length > 0) await client.appendValues(`Budget!A${ASSIGNMENTS_START_ROW + 1}`, newRows);
+  if (logRows.length > 0) await client.appendValues('Budget_Log!A2', logRows);
+}
+
 // ─── View builders ────────────────────────────────────────────────────────────
 
 /**

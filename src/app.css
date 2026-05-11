@@ -84,6 +84,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   font-size: 14px; border: 1px solid var(--border); border-radius: 8px;
   padding: 4px 8px; background: var(--bg); color: var(--text);
 }
+.apply-template-btn { font-size: 13px; padding: 5px 10px; white-space: nowrap; }
 
 /* ── Ready to Assign banner ───────────────────────────────────────────────── */
 .ready-to-assign {

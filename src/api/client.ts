@@ -68,6 +68,14 @@ export class SheetsClient {
     );
   }
 
+  /** POST — update multiple non-contiguous ranges in a single request. */
+  async batchUpdateValues(data: { range: string; values: unknown[][] }[]): Promise<void> {
+    await this.request('/values:batchUpdate', {
+      method: 'POST',
+      body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }),
+    });
+  }
+
   // ─── Spreadsheet batchUpdate ─────────────────────────────────────────────────
 
   async batchUpdate(requests: unknown[]): Promise<void> {
