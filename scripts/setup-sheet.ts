@@ -1185,6 +1185,85 @@ async function writeSheetVersion(
   log(`Sheet version: wrote SHEET_VERSION=${SHEET_VERSION} to Reflect!A1`);
 }
 
+// ─── Step: Clean Up Orphaned Assignment Rows ──────────────────────────────────
+
+const YYYYMM_RE = /^\d{4}-\d{2}$/;
+
+/**
+ * Remove any Budget assignment rows where the month cell is not in YYYY-MM
+ * format. This cleans up rows written before the USER_ENTERED → RAW fix, where
+ * Google Sheets silently converted "2026-05" to a date serial (e.g. 46143).
+ * Deletion is done via batchUpdate deleteRange requests, which physically
+ * removes the rows and shifts remaining data up.
+ */
+async function cleanOrphanedAssignmentRows(
+  sheets: sheets_v4.Sheets,
+  sheetId: string,
+  sheetMeta: sheets_v4.Schema$Sheet[]
+): Promise<void> {
+  const dataStart = BUDGET_ASSIGNMENTS_START_ROW + 1; // 509
+
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `Budget!A${dataStart}:A`,
+  });
+
+  const rows = res.data.values ?? [];
+  if (rows.length === 0) {
+    log("Cleanup: no assignment data rows found, skipping");
+    return;
+  }
+
+  // Collect 0-based sheet row indices of orphaned rows (descending so we can
+  // delete bottom-up without shifting indices of earlier rows).
+  const orphanedIndices: number[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const cell = (rows[i]?.[0] ?? "").toString().trim();
+    if (cell !== "" && !YYYYMM_RE.test(cell)) {
+      orphanedIndices.push(dataStart - 1 + i); // convert to 0-based sheet row index
+    }
+  }
+
+  if (orphanedIndices.length === 0) {
+    log("Cleanup: no orphaned assignment rows found");
+    return;
+  }
+
+  log(`Cleanup: found ${orphanedIndices.length} orphaned assignment row(s) with invalid month values`);
+
+  const budgetMeta = findSheet(sheetMeta, "Budget");
+  if (!budgetMeta) {
+    log("Cleanup: Budget sheet metadata not found, skipping deletion");
+    return;
+  }
+  const tabSheetId = budgetMeta.properties?.sheetId!;
+
+  // Delete in descending order so row indices stay valid as we remove rows.
+  orphanedIndices.sort((a, b) => b - a);
+
+  // Batch into groups of 100 to stay within batchUpdate request limits.
+  const BATCH = 100;
+  for (let start = 0; start < orphanedIndices.length; start += BATCH) {
+    const chunk = orphanedIndices.slice(start, start + BATCH);
+    const requests = chunk.map((rowIdx) => ({
+      deleteRange: {
+        range: {
+          sheetId: tabSheetId,
+          startRowIndex: rowIdx,
+          endRowIndex: rowIdx + 1,
+        },
+        shiftDimension: "ROWS",
+      },
+    }));
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: { requests },
+    });
+  }
+
+  log(`Cleanup: deleted ${orphanedIndices.length} orphaned assignment row(s)`);
+}
+
 // ─── Logging & Error Helpers ──────────────────────────────────────────────────
 
 function log(msg: string): void {
@@ -1254,6 +1333,9 @@ async function main(): Promise<void> {
 
   // 14. Write sheet version
   await writeSheetVersion(sheets, sheetId);
+
+  // 15. Clean up orphaned assignment rows (month stored as date serial instead of YYYY-MM text)
+  await cleanOrphanedAssignmentRows(sheets, sheetId, sheetMeta);
 
   console.log(
     "\n── Setup complete ───────────────────────────────────────────\n"

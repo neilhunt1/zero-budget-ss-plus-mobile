@@ -55,15 +55,18 @@ export class SheetsClient {
   /** PUT — overwrites the given range. */
   async updateValues(range: string, values: unknown[][]): Promise<void> {
     await this.request(
-      `/values/${enc(range)}?valueInputOption=USER_ENTERED`,
+      `/values/${enc(range)}?valueInputOption=RAW`,
       { method: 'PUT', body: JSON.stringify({ range, values }) }
     );
   }
 
-  /** POST — appends rows below the last non-empty row in the range. */
+  /** POST — appends rows below the last non-empty row in the range.
+   * Uses OVERWRITE (not INSERT_ROWS) to avoid triggering formula-range
+   * adjustments in dependent sheets (Budget_Calcs SUMIFS) which cause a
+   * brief recalculation gap where reads return stale zero values. */
   async appendValues(range: string, values: unknown[][]): Promise<void> {
     await this.request(
-      `/values/${enc(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+      `/values/${enc(range)}:append?valueInputOption=RAW&insertDataOption=OVERWRITE`,
       { method: 'POST', body: JSON.stringify({ range, values }) }
     );
   }
@@ -72,7 +75,7 @@ export class SheetsClient {
   async batchUpdateValues(data: { range: string; values: unknown[][] }[]): Promise<void> {
     await this.request('/values:batchUpdate', {
       method: 'POST',
-      body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }),
+      body: JSON.stringify({ valueInputOption: 'RAW', data }),
     });
   }
 
