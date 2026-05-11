@@ -11,6 +11,8 @@ import {
   upsertAssignment,
   appendLogEntry,
   applyTemplate,
+  batchUpsertAssignments,
+  batchAppendLogEntries,
 } from '../api/budget';
 import { GroupedBudget, BudgetAssignment, BudgetCategory, CategoryWithActivity } from '../types';
 
@@ -37,6 +39,17 @@ interface EditState {
   saveError: string | null;
 }
 
+interface MoveMoneyState {
+  destCat: CategoryWithActivity;
+  destExisting: BudgetAssignment | undefined;
+  sourceCat: CategoryWithActivity | null;
+  sourceExisting: BudgetAssignment | undefined;
+  step: 'picking' | 'confirming';
+  amountInput: string;
+  saving: boolean;
+  saveError: string | null;
+}
+
 export default function Plan() {
   const { token } = useAuth();
   const revision = useSheetSync(token);
@@ -47,6 +60,7 @@ export default function Plan() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editState, setEditState] = useState<EditState | null>(null);
+  const [moveMoneyState, setMoveMoneyState] = useState<MoveMoneyState | null>(null);
   const [categories, setCategories] = useState<BudgetCategory[]>([]);
   const [applyingTemplate, setApplyingTemplate] = useState(false);
 
@@ -131,6 +145,88 @@ export default function Plan() {
       );
     }
   };
+
+  const handleMoveMoney = () => {
+    if (!editState) return;
+    setMoveMoneyState({
+      destCat: editState.cat,
+      destExisting: editState.existing,
+      sourceCat: null,
+      sourceExisting: undefined,
+      step: 'picking',
+      amountInput: '',
+      saving: false,
+      saveError: null,
+    });
+    setEditState(null);
+  };
+
+  const handlePickSource = (sourceCat: CategoryWithActivity) => {
+    if (!moveMoneyState) return;
+    const { destCat } = moveMoneyState;
+    const deficit = destCat.available < 0 ? -destCat.available : 0;
+    const sourceExisting = assignments.find((a) => a.category === sourceCat.category);
+    setMoveMoneyState((prev) =>
+      prev
+        ? {
+            ...prev,
+            sourceCat,
+            sourceExisting,
+            step: 'confirming',
+            amountInput: deficit > 0 ? String(deficit) : '',
+          }
+        : null
+    );
+  };
+
+  const handleMoveMoneyCancel = () => setMoveMoneyState(null);
+
+  const handleMoveMoneyConfirm = async () => {
+    if (!moveMoneyState?.sourceCat || !token) return;
+    const { destCat, destExisting, sourceCat, sourceExisting } = moveMoneyState;
+    const amount = parseFloat(moveMoneyState.amountInput) || 0;
+    if (amount <= 0) return;
+
+    if (amount > sourceCat.available) {
+      setMoveMoneyState((prev) =>
+        prev
+          ? { ...prev, saveError: `Amount exceeds ${sourceCat.category}'s available balance (${fmt(sourceCat.available)})` }
+          : null
+      );
+      return;
+    }
+
+    setMoveMoneyState((prev) => (prev ? { ...prev, saving: true, saveError: null } : null));
+    try {
+      const client = new SheetsClient(SHEET_ID, token);
+      await batchUpsertAssignments(client, month, [
+        { category: sourceCat.category, assigned: sourceCat.assigned - amount, existing: sourceExisting },
+        { category: destCat.category, assigned: destCat.assigned + amount, existing: destExisting },
+      ]);
+      await batchAppendLogEntries(client, [
+        { month, category: sourceCat.category, amount: -amount, change_type: `move_from:${destCat.category}` },
+        { month, category: destCat.category, amount, change_type: `move_to:${sourceCat.category}` },
+      ]);
+      setMoveMoneyState(null);
+      await load();
+    } catch (e) {
+      setMoveMoneyState((prev) =>
+        prev ? { ...prev, saving: false, saveError: (e as Error).message } : null
+      );
+    }
+  };
+
+  const allCatsFlat = groups.flatMap((g) => g.subgroups.flatMap((s) => s.categories));
+  const pickerCats = moveMoneyState
+    ? [...allCatsFlat]
+        .filter((c) => c.category !== moveMoneyState.destCat.category && c.available > 0)
+        .sort((a, b) => {
+          const aFluid = a.category_type === 'fluid' ? 0 : 1;
+          const bFluid = b.category_type === 'fluid' ? 0 : 1;
+          if (aFluid !== bFluid) return aFluid - bFluid;
+          return b.available - a.available;
+        })
+    : [];
 
   return (
     <div className="screen plan-screen">
@@ -267,6 +363,104 @@ export default function Plan() {
                 disabled={editState.saving}
               >
                 {editState.saving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+            <button type="button" className="move-money-btn" onClick={handleMoveMoney}>
+              Move Money
+            </button>
+          </div>
+        </div>
+      )}
+
+      {moveMoneyState?.step === 'picking' && (
+        <div className="assign-overlay" onClick={handleMoveMoneyCancel}>
+          <div className="assign-sheet picker-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="assign-sheet-handle" />
+            <div className="assign-sheet-title">Move money to {moveMoneyState.destCat.category}</div>
+            <div className="picker-subtitle">Pick a source category</div>
+            <div className="picker-list">
+              {pickerCats.length === 0 ? (
+                <div className="picker-empty">No categories have available funds to move from.</div>
+              ) : pickerCats.map((cat) => (
+                <button
+                  key={cat.category}
+                  type="button"
+                  className="picker-item"
+                  onClick={() => handlePickSource(cat)}
+                >
+                  {cat.category_type === 'fluid' && (
+                    <span className="picker-item-fluid-badge">Fluid</span>
+                  )}
+                  <span className="picker-item-name">{cat.category}</span>
+                  <span className="picker-item-balance">
+                    {fmt(cat.available)}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <button type="button" className="picker-cancel" onClick={handleMoveMoneyCancel}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {moveMoneyState?.step === 'confirming' && moveMoneyState.sourceCat && (
+        <div className="assign-overlay" onClick={handleMoveMoneyCancel}>
+          <div className="assign-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="assign-sheet-handle" />
+            <div className="assign-sheet-title">Move Money</div>
+            <div className="move-confirm-info">
+              <span>From: <strong>{moveMoneyState.sourceCat.category}</strong> ({fmt(moveMoneyState.sourceCat.available)} available)</span>
+              <br />
+              <span>To: <strong>{moveMoneyState.destCat.category}</strong></span>
+            </div>
+            <label className="assign-label" htmlFor="move-amount-input">Amount to move</label>
+            <input
+              id="move-amount-input"
+              className="assign-input"
+              type="number"
+              inputMode="decimal"
+              value={moveMoneyState.amountInput}
+              onChange={(e) =>
+                setMoveMoneyState((prev) => (prev ? { ...prev, amountInput: e.target.value } : null))
+              }
+              placeholder="0"
+              // eslint-disable-next-line jsx-a11y/no-autofocus
+              autoFocus
+            />
+            {moveMoneyState.destCat.available < 0 && (
+              <button
+                type="button"
+                className="cover-shortcut"
+                onClick={() =>
+                  setMoveMoneyState((prev) =>
+                    prev ? { ...prev, amountInput: String(-moveMoneyState.destCat.available) } : null
+                  )
+                }
+              >
+                Cover shortage ({fmt(-moveMoneyState.destCat.available)})
+              </button>
+            )}
+            {moveMoneyState.saveError && (
+              <div className="assign-save-error">{moveMoneyState.saveError}</div>
+            )}
+            <div className="assign-sheet-actions">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={handleMoveMoneyCancel}
+                disabled={moveMoneyState.saving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={handleMoveMoneyConfirm}
+                disabled={moveMoneyState.saving}
+              >
+                {moveMoneyState.saving ? 'Moving…' : 'Confirm'}
               </button>
             </div>
           </div>
