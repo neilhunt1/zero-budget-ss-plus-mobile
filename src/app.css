@@ -215,6 +215,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 .picker-item-name { flex: 1; font-size: 14px; }
 .picker-item-balance { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.picker-empty { padding: 24px 20px; text-align: center; color: var(--text-secondary); font-size: 14px; }
 .picker-cancel {
   margin: 12px 20px 0; padding: 12px; border-radius: 10px;
   border: 1px solid var(--border); background: var(--bg); font-size: 15px; font-weight: 600;

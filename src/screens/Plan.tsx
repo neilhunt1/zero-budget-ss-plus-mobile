@@ -187,6 +187,15 @@ export default function Plan() {
     const amount = parseFloat(moveMoneyState.amountInput) || 0;
     if (amount <= 0) return;
 
+    if (amount > sourceCat.available) {
+      setMoveMoneyState((prev) =>
+        prev
+          ? { ...prev, saveError: `Amount exceeds ${sourceCat.category}'s available balance (${fmt(sourceCat.available)})` }
+          : null
+      );
+      return;
+    }
+
     setMoveMoneyState((prev) => (prev ? { ...prev, saving: true, saveError: null } : null));
     try {
       const client = new SheetsClient(SHEET_ID, token);
@@ -210,7 +219,7 @@ export default function Plan() {
   const allCatsFlat = groups.flatMap((g) => g.subgroups.flatMap((s) => s.categories));
   const pickerCats = moveMoneyState
     ? [...allCatsFlat]
-        .filter((c) => c.category !== moveMoneyState.destCat.category)
+        .filter((c) => c.category !== moveMoneyState.destCat.category && c.available > 0)
         .sort((a, b) => {
           const aFluid = a.category_type === 'fluid' ? 0 : 1;
           const bFluid = b.category_type === 'fluid' ? 0 : 1;
@@ -370,7 +379,9 @@ export default function Plan() {
             <div className="assign-sheet-title">Move money to {moveMoneyState.destCat.category}</div>
             <div className="picker-subtitle">Pick a source category</div>
             <div className="picker-list">
-              {pickerCats.map((cat) => (
+              {pickerCats.length === 0 ? (
+                <div className="picker-empty">No categories have available funds to move from.</div>
+              ) : pickerCats.map((cat) => (
                 <button
                   key={cat.category}
                   type="button"
@@ -381,7 +392,7 @@ export default function Plan() {
                     <span className="picker-item-fluid-badge">Fluid</span>
                   )}
                   <span className="picker-item-name">{cat.category}</span>
-                  <span className={`picker-item-balance${cat.available < 0 ? ' negative' : ''}`}>
+                  <span className="picker-item-balance">
                     {fmt(cat.available)}
                   </span>
                 </button>
