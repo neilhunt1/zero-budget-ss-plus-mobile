@@ -186,6 +186,53 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   border-radius: 10px; padding: 12px 24px; font-size: 15px; font-weight: 600; cursor: pointer;
 }
 
+/* ── Move Money ───────────────────────────────────────────────────────────── */
+.move-money-btn {
+  width: 100%; margin-top: 12px; background: none; border: 1px solid var(--accent);
+  border-radius: 10px; padding: 10px; font-size: 15px; font-weight: 600;
+  color: var(--accent); cursor: pointer;
+}
+.move-money-btn:hover { background: #eef3fb; }
+
+.picker-sheet {
+  max-height: 80vh; display: flex; flex-direction: column; padding-bottom: 20px;
+}
+.picker-subtitle {
+  font-size: 13px; color: var(--text-secondary); text-align: center;
+  padding: 0 20px 12px; border-bottom: 1px solid var(--border);
+}
+.picker-list { overflow-y: auto; flex: 1; }
+.picker-item {
+  display: flex; align-items: center; padding: 14px 20px;
+  border-bottom: 1px solid var(--border); background: var(--surface);
+  width: 100%; text-align: left; font: inherit;
+  border-left: none; border-right: none; border-top: none; cursor: pointer;
+}
+.picker-item:hover { background: #f8faff; }
+.picker-item-fluid-badge {
+  font-size: 11px; color: var(--accent); font-weight: 600;
+  background: #eef3fb; border-radius: 4px; padding: 2px 6px; margin-right: 8px; flex-shrink: 0;
+}
+.picker-item-name { flex: 1; font-size: 14px; }
+.picker-item-balance { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.picker-cancel {
+  margin: 12px 20px 0; padding: 12px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--bg); font-size: 15px; font-weight: 600;
+  cursor: pointer; color: var(--text); width: calc(100% - 40px); flex-shrink: 0;
+}
+
+.move-confirm-info {
+  font-size: 14px; color: var(--text-secondary); text-align: center;
+  margin-bottom: 16px; line-height: 1.6;
+}
+.move-confirm-info strong { color: var(--text); }
+.cover-shortcut {
+  display: block; width: 100%; margin-top: 10px; padding: 8px;
+  border: none; background: none; color: var(--accent); font-size: 14px;
+  font-weight: 600; cursor: pointer; text-align: center;
+}
+.cover-shortcut:hover { text-decoration: underline; }
+
 /* ── Accounts screen ──────────────────────────────────────────────────────── */
 .accounts-total {
   display: flex; justify-content: space-between; align-items: center;

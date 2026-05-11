@@ -353,3 +353,259 @@ describe('Plan screen — apply template', () => {
     );
   });
 });
+
+describe('Plan screen — move money', () => {
+  function makeSourceCat(overrides: Partial<CategoryWithActivity> = {}): CategoryWithActivity {
+    return {
+      category_group: 'Food',
+      category_subgroup: '',
+      category: 'Dining Out',
+      category_type: 'fluid',
+      monthly_template_amount: 0,
+      sort_order: 2,
+      active: true,
+      _rowIndex: 8,
+      assigned: 200,
+      activity: 50,
+      available: 150,
+      ...overrides,
+    };
+  }
+
+  function makeGroupedBudgetTwo(dest: CategoryWithActivity, source: CategoryWithActivity): GroupedBudget[] {
+    return [{
+      groupName: 'Food',
+      subgroups: [{ subgroupName: '', categories: [dest, source] }],
+      totalAssigned: dest.assigned + source.assigned,
+      totalActivity: dest.activity + source.activity,
+      totalAvailable: dest.available + source.available,
+    }];
+  }
+
+  const destCat = makeCat({ category: 'Groceries', assigned: 400, available: 300 });
+  const sourceCat = makeSourceCat({ category: 'Dining Out', assigned: 200, available: 150 });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFetchBudgetCategories.mockResolvedValue([]);
+    mockFetchMonthAssignments.mockResolvedValue([makeAssignment(400)]);
+    mockFetchCategoryCalcs.mockResolvedValue(new Map());
+    mockFetchReadyToAssign.mockResolvedValue(500);
+    mockBuildGroupedBudget.mockReturnValue(makeGroupedBudgetTwo(destCat, sourceCat));
+    mockUpsertAssignment.mockResolvedValue(undefined);
+    mockAppendLogEntry.mockResolvedValue(undefined);
+  });
+
+  it('shows Move Money button in assignment sheet', async () => {
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const row = await screen.findByRole('button', { name: /Groceries/i });
+    fireEvent.click(row);
+
+    expect(screen.getByRole('button', { name: /Move Money/i })).toBeInTheDocument();
+  });
+
+  it('clicking Move Money opens the category picker', async () => {
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const row = await screen.findByRole('button', { name: /Groceries/i });
+    fireEvent.click(row);
+    fireEvent.click(screen.getByRole('button', { name: /Move Money/i }));
+
+    expect(screen.getByText(/Pick a source category/i)).toBeInTheDocument();
+  });
+
+  it('picker excludes the destination category', async () => {
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const row = await screen.findByRole('button', { name: /Groceries/i });
+    fireEvent.click(row);
+    fireEvent.click(screen.getByRole('button', { name: /Move Money/i }));
+
+    const pickerItems = document.querySelectorAll('.picker-item');
+    const pickerNames = [...pickerItems].map((el) => el.textContent);
+    expect(pickerNames.some((t) => t?.includes('Dining Out'))).toBe(true);
+    expect(pickerNames.some((t) => t?.includes('Groceries'))).toBe(false);
+  });
+
+  it('fluid categories appear first in the picker', async () => {
+    const fixedCat = makeSourceCat({ category: 'Rent', category_type: 'fixed_bill', available: 9999 });
+    const fluidCat = makeSourceCat({ category: 'Dining Out', category_type: 'fluid', available: 10 });
+    mockBuildGroupedBudget.mockReturnValue([{
+      groupName: 'Mixed',
+      subgroups: [{ subgroupName: '', categories: [destCat, fixedCat, fluidCat] }],
+      totalAssigned: 0, totalActivity: 0, totalAvailable: 0,
+    }]);
+
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const row = await screen.findByRole('button', { name: /Groceries/i });
+    fireEvent.click(row);
+    fireEvent.click(screen.getByRole('button', { name: /Move Money/i }));
+
+    const pickerItems = document.querySelectorAll('.picker-item');
+    const names = [...pickerItems].map((el) => el.querySelector('.picker-item-name')?.textContent);
+    expect(names[0]).toBe('Dining Out'); // fluid first even though lower available
+  });
+
+  it('selecting a source moves to confirm step', async () => {
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const row = await screen.findByRole('button', { name: /Groceries/i });
+    fireEvent.click(row);
+    fireEvent.click(screen.getByRole('button', { name: /Move Money/i }));
+
+    const pickerItem = document.querySelector('.picker-item') as HTMLElement;
+    fireEvent.click(pickerItem);
+
+    expect(screen.getByRole('button', { name: /Confirm/i })).toBeInTheDocument();
+    expect(screen.getByText(/Amount to move/i)).toBeInTheDocument();
+  });
+
+  it('Cover shortage button appears when destination is overspent', async () => {
+    const overspentDest = makeCat({ category: 'Groceries', assigned: 100, available: -50 });
+    mockBuildGroupedBudget.mockReturnValue(makeGroupedBudgetTwo(overspentDest, sourceCat));
+
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const row = await screen.findByRole('button', { name: /Groceries/i });
+    fireEvent.click(row);
+    fireEvent.click(screen.getByRole('button', { name: /Move Money/i }));
+
+    const pickerItem = document.querySelector('.picker-item') as HTMLElement;
+    fireEvent.click(pickerItem);
+
+    expect(screen.getByRole('button', { name: /Cover shortage/i })).toBeInTheDocument();
+  });
+
+  it('Cover shortage button not shown when destination is not overspent', async () => {
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const row = await screen.findByRole('button', { name: /Groceries/i });
+    fireEvent.click(row);
+    fireEvent.click(screen.getByRole('button', { name: /Move Money/i }));
+
+    const pickerItem = document.querySelector('.picker-item') as HTMLElement;
+    fireEvent.click(pickerItem);
+
+    expect(screen.queryByRole('button', { name: /Cover shortage/i })).not.toBeInTheDocument();
+  });
+
+  it('Cover shortage pre-fills the exact deficit', async () => {
+    const overspentDest = makeCat({ category: 'Groceries', assigned: 100, available: -75 });
+    mockBuildGroupedBudget.mockReturnValue(makeGroupedBudgetTwo(overspentDest, sourceCat));
+
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const row = await screen.findByRole('button', { name: /Groceries/i });
+    fireEvent.click(row);
+    fireEvent.click(screen.getByRole('button', { name: /Move Money/i }));
+
+    fireEvent.click(document.querySelector('.picker-item') as HTMLElement);
+    fireEvent.click(screen.getByRole('button', { name: /Cover shortage/i }));
+
+    expect(screen.getByRole('spinbutton')).toHaveValue(75);
+  });
+
+  it('confirm calls upsertAssignment twice — source decreases, dest increases', async () => {
+    const sourceAssignment: BudgetAssignment = {
+      month: '2026-04', category: 'Dining Out', assigned: 200, source: 'manual', _rowIndex: 510,
+    };
+    mockFetchMonthAssignments.mockResolvedValue([makeAssignment(400), sourceAssignment]);
+
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const row = await screen.findByRole('button', { name: /Groceries/i });
+    fireEvent.click(row);
+    fireEvent.click(screen.getByRole('button', { name: /Move Money/i }));
+    fireEvent.click(document.querySelector('.picker-item') as HTMLElement);
+
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '50' } });
+    fireEvent.click(screen.getByRole('button', { name: /Confirm/i }));
+
+    await waitFor(() => expect(mockUpsertAssignment).toHaveBeenCalledTimes(2));
+
+    const calls = mockUpsertAssignment.mock.calls;
+    // Source: Dining Out assigned 200 - 50 = 150
+    expect(calls.some((c) => c[2] === 'Dining Out' && c[3] === 150)).toBe(true);
+    // Dest: Groceries assigned 400 + 50 = 450
+    expect(calls.some((c) => c[2] === 'Groceries' && c[3] === 450)).toBe(true);
+  });
+
+  it('confirm calls appendLogEntry with move_from and move_to change types', async () => {
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const row = await screen.findByRole('button', { name: /Groceries/i });
+    fireEvent.click(row);
+    fireEvent.click(screen.getByRole('button', { name: /Move Money/i }));
+    fireEvent.click(document.querySelector('.picker-item') as HTMLElement);
+
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '30' } });
+    fireEvent.click(screen.getByRole('button', { name: /Confirm/i }));
+
+    await waitFor(() => expect(mockAppendLogEntry).toHaveBeenCalledTimes(2));
+
+    const logCalls = mockAppendLogEntry.mock.calls;
+    expect(logCalls.some((c) => c[4]?.startsWith('move_from:'))).toBe(true);
+    expect(logCalls.some((c) => c[4]?.startsWith('move_to:'))).toBe(true);
+  });
+
+  it('cancel in picker closes the move money flow', async () => {
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const row = await screen.findByRole('button', { name: /Groceries/i });
+    fireEvent.click(row);
+    fireEvent.click(screen.getByRole('button', { name: /Move Money/i }));
+
+    expect(screen.getByText(/Pick a source category/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Cancel/i }));
+
+    expect(screen.queryByText(/Pick a source category/i)).not.toBeInTheDocument();
+    expect(mockUpsertAssignment).not.toHaveBeenCalled();
+  });
+
+  it('cancel in confirm step closes the move money flow without saving', async () => {
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const row = await screen.findByRole('button', { name: /Groceries/i });
+    fireEvent.click(row);
+    fireEvent.click(screen.getByRole('button', { name: /Move Money/i }));
+    fireEvent.click(document.querySelector('.picker-item') as HTMLElement);
+
+    expect(screen.getByRole('button', { name: /Confirm/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Cancel/i }));
+
+    expect(screen.queryByRole('button', { name: /Confirm/i })).not.toBeInTheDocument();
+    expect(mockUpsertAssignment).not.toHaveBeenCalled();
+  });
+
+  it('plan refreshes after a successful move', async () => {
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const row = await screen.findByRole('button', { name: /Groceries/i });
+    fireEvent.click(row);
+    fireEvent.click(screen.getByRole('button', { name: /Move Money/i }));
+    fireEvent.click(document.querySelector('.picker-item') as HTMLElement);
+
+    const callsBefore = mockFetchBudgetCategories.mock.calls.length;
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '20' } });
+    fireEvent.click(screen.getByRole('button', { name: /Confirm/i }));
+
+    await waitFor(() =>
+      expect(mockFetchBudgetCategories.mock.calls.length).toBeGreaterThan(callsBefore)
+    );
+  });
+});
