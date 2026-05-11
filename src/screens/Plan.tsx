@@ -119,6 +119,9 @@ export default function Plan() {
     try {
       const client = new SheetsClient(SHEET_ID, token);
       await applyTemplate(client, month, categories, assignments);
+      // Brief pause: lets Google Sheets finish recalculating SUMIFS formulas
+      // in Budget_Calcs before we read them back.
+      await new Promise((r) => setTimeout(r, 800));
       await load();
     } catch (e) {
       setError((e as Error).message);
