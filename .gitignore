@@ -10,3 +10,4 @@ test-results/
 service-account-*.json
 *-service-account.json
 *.key.json
+.claude/worktrees/
