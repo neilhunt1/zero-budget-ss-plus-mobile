@@ -1,12 +1,41 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { VitePWA } from 'vite-plugin-pwa';
+
+// VITE_BASE_PATH is set in CI to /zero-budget-ss-plus-mobile/ for GitHub Pages.
+// Locally it defaults to / so dev server works normally.
+const base = process.env.VITE_BASE_PATH ?? '/';
 
 export default defineConfig({
-  plugins: [react()],
-  // VITE_BASE_PATH is set in CI to /zero-budget-ss-plus-mobile/ for GitHub Pages.
-  // Locally it defaults to / so dev server works normally.
-  base: process.env.VITE_BASE_PATH ?? '/',
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      includeAssets: ['favicon.svg', 'icons/*.png'],
+      manifest: {
+        name: 'Zero Budget',
+        short_name: 'Budget',
+        description: 'Personal budgeting app',
+        theme_color: '#1a1a2e',
+        background_color: '#f5f5f7',
+        display: 'standalone',
+        orientation: 'portrait',
+        start_url: base,
+        scope: base,
+        icons: [
+          { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+        ],
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        navigateFallback: null,
+        runtimeCaching: [],
+      },
+    }),
+  ],
+  base,
   build: {
     outDir: 'dist/app',
   },

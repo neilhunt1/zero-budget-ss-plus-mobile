@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useSheetSync } from '../hooks/useSheetSync';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import { SheetsClient } from '../api/client';
 import {
   fetchBudgetCategories,
@@ -63,6 +64,8 @@ export default function Plan() {
   const [moveMoneyState, setMoveMoneyState] = useState<MoveMoneyState | null>(null);
   const [categories, setCategories] = useState<BudgetCategory[]>([]);
   const [applyingTemplate, setApplyingTemplate] = useState(false);
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const isDesktop = useMediaQuery('(min-width: 768px)');
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -88,6 +91,13 @@ export default function Plan() {
   }, [token, month, revision]); // revision triggers re-fetch when sheet changes
 
   useEffect(() => { load(); }, [load]);
+
+  // Auto-select first group on desktop when data loads
+  useEffect(() => {
+    if (isDesktop && groups.length > 0 && !selectedGroup) {
+      setSelectedGroup(groups[0].groupName);
+    }
+  }, [isDesktop, groups, selectedGroup]);
 
   const totalAssigned = groups.reduce((s, g) => s + g.totalAssigned, 0);
   const totalActivity = groups.reduce((s, g) => s + g.totalActivity, 0);
@@ -281,50 +291,74 @@ export default function Plan() {
             </div>
           </div>
 
-          {/* Column headers */}
-          <div className="budget-col-headers">
-            <span className="col-name">Category</span>
-            <span className="col-num">Assigned</span>
-            <span className="col-num">Activity</span>
-            <span className="col-num">Available</span>
-          </div>
+          <div className={isDesktop ? 'plan-desktop-body' : undefined}>
+            {isDesktop && (
+              <div className="plan-group-sidebar">
+                {groups.map((g) => (
+                  <button
+                    key={g.groupName}
+                    type="button"
+                    className={`plan-group-tab${selectedGroup === g.groupName ? ' active' : ''}`}
+                    onClick={() => setSelectedGroup(g.groupName)}
+                  >
+                    <span className="plan-group-tab-name">{g.groupName}</span>
+                    <span className={`plan-group-tab-total${g.totalAvailable < 0 ? ' negative' : ''}`}>
+                      {fmt(g.totalAvailable)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
 
-          {/* Groups */}
-          {groups.map((group) => (
-            <div key={group.groupName} className="budget-group">
-              <div className="group-header">
-                <span className="group-name">{group.groupName}</span>
-                <span className="col-num group-total">{fmt(group.totalAvailable)}</span>
+            <div className="plan-group-detail">
+              {/* Column headers */}
+              <div className="budget-col-headers">
+                <span className="col-name">Category</span>
+                <span className="col-num">Assigned</span>
+                <span className="col-num">Activity</span>
+                <span className="col-num">Available</span>
               </div>
 
-              {group.subgroups.map(({ subgroupName, categories }) => (
-                <div key={subgroupName || '__root__'} className="budget-subgroup">
-                  {subgroupName && (
-                    <div className="subgroup-header">{subgroupName}</div>
+              {/* Groups: all on mobile, selected group on desktop */}
+              {(isDesktop ? groups.filter((g) => g.groupName === selectedGroup) : groups).map((group) => (
+                <div key={group.groupName} className="budget-group">
+                  {!isDesktop && (
+                    <div className="group-header">
+                      <span className="group-name">{group.groupName}</span>
+                      <span className="col-num group-total">{fmt(group.totalAvailable)}</span>
+                    </div>
                   )}
-                  {categories.map((cat) => (
-                    <button
-                      key={cat.category}
-                      type="button"
-                      className={`budget-row${cat.available < 0 ? ' overspent' : ''}`}
-                      onClick={() => handleRowClick(cat)}
-                    >
-                      <span className="col-name">{cat.category}</span>
-                      <span className="col-num">{fmt(cat.assigned)}</span>
-                      <span className="col-num">{fmt(cat.activity)}</span>
-                      <span className={`col-num${cat.available < 0 ? ' negative' : ''}`}>
-                        {fmt(cat.available)}
-                      </span>
-                    </button>
+
+                  {group.subgroups.map(({ subgroupName, categories }) => (
+                    <div key={subgroupName || '__root__'} className="budget-subgroup">
+                      {subgroupName && (
+                        <div className="subgroup-header">{subgroupName}</div>
+                      )}
+                      {categories.map((cat) => (
+                        <button
+                          key={cat.category}
+                          type="button"
+                          className={`budget-row${cat.available < 0 ? ' overspent' : ''}`}
+                          onClick={() => handleRowClick(cat)}
+                        >
+                          <span className="col-name">{cat.category}</span>
+                          <span className="col-num">{fmt(cat.assigned)}</span>
+                          <span className="col-num">{fmt(cat.activity)}</span>
+                          <span className={`col-num${cat.available < 0 ? ' negative' : ''}`}>
+                            {fmt(cat.available)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   ))}
                 </div>
               ))}
-            </div>
-          ))}
 
-          {groups.length === 0 && (
-            <div className="state-msg">No categories found. Run <code>npm run setup:dev</code> first.</div>
-          )}
+              {groups.length === 0 && (
+                <div className="state-msg">No categories found. Run <code>npm run setup:dev</code> first.</div>
+              )}
+            </div>
+          </div>
         </>
       )}
 
