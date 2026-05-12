@@ -16,6 +16,8 @@
     "sync-from-ynab:dev": "ts-node --project tsconfig.scripts.json scripts/sync-from-ynab.ts --env dev",
     "sync-from-ynab:prod": "ts-node --project tsconfig.scripts.json scripts/sync-from-ynab.ts --env prod",
     "sync-from-prod-to-dev": "ts-node --project tsconfig.scripts.json scripts/sync-from-prod-to-dev.ts",
+    "import:ynab:dev": "ts-node --project tsconfig.scripts.json scripts/import-ynab-transactions.ts --env dev",
+    "import:ynab:prod": "ts-node --project tsconfig.scripts.json scripts/import-ynab-transactions.ts --env prod",
     "test:integration": "vitest run tests/integration --passWithNoTests"
   },
   "dependencies": {
