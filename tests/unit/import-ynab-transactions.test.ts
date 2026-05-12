@@ -572,6 +572,17 @@ describe('parseCsv', () => {
     expect(parseCsv('')).toEqual([]);
   });
 
+  it('strips UTF-8 BOM from the start of the file', () => {
+    const bom = '﻿';
+    const csv = bom + [
+      '"Account","Flag","Date","Payee","Category Group/Category","Category Group","Category","Memo","Outflow","Inflow","Cleared"',
+      '360 Savings,,04/01/2026,Test Payee,,,Cat,,10.00,.00,Cleared',
+    ].join('\n');
+    const rows = parseCsv(csv);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].account).toBe('360 Savings');
+  });
+
   it('skips rows with unparseable dates but parses rest', () => {
     const csv = [
       'Account,Flag,Date,Payee,Category Group/Category,Category Group,Category,Memo,Outflow,Inflow,Cleared',

@@ -430,7 +430,9 @@ export function parseCsvLine(line: string): string[] {
  * Skips rows with unparseable dates. Logs warnings for bad rows.
  */
 export function parseCsv(csvContent: string): YnabCsvRow[] {
-  const lines = csvContent.split(/\r?\n/).filter((l) => l.trim() !== '');
+  // Strip UTF-8 BOM if present (YNAB exports include it)
+  const cleaned = csvContent.replace(/^﻿/, '');
+  const lines = cleaned.split(/\r?\n/).filter((l) => l.trim() !== '');
   if (lines.length === 0) return [];
 
   const headers = parseCsvLine(lines[0]).map((h) => h.toLowerCase().trim());
@@ -452,8 +454,15 @@ export function parseCsv(csvContent: string): YnabCsvRow[] {
   const inflowCol = col('inflow');
   const clearedCol = col('cleared');
 
-  const required = { accountCol, dateCol, payeeCol, outflowCol, inflowCol, clearedCol };
-  const missing = Object.entries(required).filter(([, v]) => v === -1).map(([k]) => k);
+  const requiredCols: Array<[string, number]> = [
+    ['account', accountCol],
+    ['date', dateCol],
+    ['payee', payeeCol],
+    ['outflow', outflowCol],
+    ['inflow', inflowCol],
+    ['cleared', clearedCol],
+  ];
+  const missing = requiredCols.filter(([, idx]) => idx === -1).map(([name]) => name);
   if (missing.length > 0) {
     bail(
       `YNAB CSV missing expected columns: ${missing.join(', ')}.\n` +
