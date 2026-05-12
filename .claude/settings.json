@@ -9,6 +9,17 @@
           }
         ]
       }
+    ],
+    "WorktreeCreate": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "WORKTREE=$(jq -r '.worktree_path'); for f in .env.development .env.production; do SRC=\"$CLAUDE_PROJECT_DIR/$f\"; if [ -f \"$SRC\" ]; then cp \"$SRC\" \"$WORKTREE/$f\"; fi; done",
+            "statusMessage": "Copying env files to worktree…"
+          }
+        ]
+      }
     ]
   }
 }
