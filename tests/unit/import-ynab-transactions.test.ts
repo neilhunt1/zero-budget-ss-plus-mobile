@@ -453,9 +453,9 @@ describe('buildRegularTransactionRow', () => {
     expect(row[col('transaction_id')]).toBe(row[col('external_id')]);
   });
 
-  it('sets reviewed to FALSE', () => {
+  it('sets reviewed to TRUE', () => {
     const row = buildRegularTransactionRow(r, importedAt, categoryIndex);
-    expect(row[col('reviewed')]).toBe('FALSE');
+    expect(row[col('reviewed')]).toBe('TRUE');
   });
 
   it('preserves memo', () => {

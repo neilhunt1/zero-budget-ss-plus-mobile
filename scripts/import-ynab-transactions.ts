@@ -281,7 +281,7 @@ export function buildSplitParentRow(
   row[col('account')] = first.account;
   row[col('memo')] = '';
   row[col('flag')] = first.flag;
-  row[col('reviewed')] = 'FALSE';
+  row[col('reviewed')] = 'TRUE';
 
   return { parentRow: row, parentId, splitGroupId };
 }
@@ -323,7 +323,7 @@ export function buildSplitChildRows(
     row[col('account')] = r.account;
     row[col('memo')] = cleanMemo;
     row[col('flag')] = r.flag;
-    row[col('reviewed')] = 'FALSE';
+    row[col('reviewed')] = 'TRUE';
 
     return row;
   });
@@ -360,7 +360,7 @@ export function buildRegularTransactionRow(
   row[col('account')] = r.account;
   row[col('memo')] = r.memo;
   row[col('flag')] = r.flag;
-  row[col('reviewed')] = 'FALSE';
+  row[col('reviewed')] = 'TRUE';
 
   return row;
 }
