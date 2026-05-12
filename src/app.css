@@ -52,7 +52,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 .btn-primary:hover { background: var(--accent-dark); }
 
-/* ── Bottom nav ───────────────────────────────────────────────────────────── */
+/* ── Nav (mobile: bottom tab bar, desktop: left sidebar) ─────────────────── */
 .navbar {
   position: fixed; bottom: 0; left: 0; right: 0; height: var(--nav-height);
   background: var(--surface); border-top: 1px solid var(--border);
@@ -60,9 +60,10 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   padding: 0 8px;
   padding-bottom: env(safe-area-inset-bottom);
 }
+.navbar-brand { display: none; } /* hidden on mobile */
 .navbar-tabs { display: flex; flex: 1; }
 .nav-item {
-  flex: 1; display: flex; align-items: center; justify-content: center;
+  flex: 1; display: inline-flex; align-items: center; justify-content: center;
   height: 100%; color: var(--text-secondary); text-decoration: none;
   font-size: 14px; font-weight: 500; padding: 8px 0;
 }
@@ -302,36 +303,39 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 
 /* ── Desktop responsive layout (≥ 768px) ─────────────────────────────────── */
 @media (min-width: 768px) {
-  /* App shell: row instead of column so navbar becomes left sidebar */
-  .app { flex-direction: row; }
-
-  /* Sidebar nav */
+  /* Top nav bar */
   .navbar {
-    position: static;
-    flex-direction: column;
-    align-items: stretch;
-    width: var(--sidebar-width);
-    min-width: var(--sidebar-width);
-    height: 100vh;
-    border-top: none;
-    border-right: 1px solid var(--border);
-    padding: 24px 0 16px;
-    overflow-y: auto;
+    top: 0; bottom: auto;
+    height: var(--nav-height);
+    border-top: none; border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    gap: 8px;
   }
-  .navbar-tabs { flex-direction: column; flex: 1; gap: 2px; padding: 0 8px; }
+  .navbar-brand {
+    display: block;
+    font-size: 16px; font-weight: 800; color: var(--accent);
+    letter-spacing: -.3px;
+    padding: 0;
+    margin-right: 16px;
+    white-space: nowrap;
+  }
+  .navbar-tabs { gap: 4px; }
   .nav-item {
-    justify-content: flex-start;
-    padding: 10px 12px;
-    height: auto;
+    flex: none;
+    padding: 0 14px;
     font-size: 15px;
     border-radius: 8px;
-    margin: 0;
   }
   .nav-item.active { background: #eef3fb; }
-  .nav-signout { padding: 10px 20px; text-align: left; }
+  .nav-signout { margin-left: auto; padding: 8px 0; }
 
-  /* Main content no longer needs bottom padding for nav */
-  .main-content { flex: 1; padding-bottom: 0; min-width: 0; }
+  /* Main content: top padding for top nav, no bottom padding */
+  .main-content { padding-bottom: 0; padding-top: var(--nav-height); }
+
+  /* Screen titles are redundant — top nav already shows where you are */
+  .screen-title { display: none; }
+  /* Accounts header is title-only so the whole bar becomes empty — collapse it */
+  .accounts-screen .screen-header { display: none; }
 
   /* Bottom sheets → centered modals */
   .assign-overlay { align-items: center; justify-content: center; }
@@ -383,3 +387,152 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   .plan-group-tab-total { font-size: 12px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
   .plan-group-tab-total.negative { color: var(--negative); }
 }
+
+/* ── Nav badge ────────────────────────────────────────────────────────────── */
+.nav-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #e53935; color: #fff; border-radius: 10px;
+  font-size: 10px; font-weight: 700; line-height: 1;
+  padding: 2px 5px; min-width: 16px;
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+/* ── Triage banner (Accounts screen) ─────────────────────────────────────── */
+.triage-banner {
+  display: block; width: calc(100% - 32px); margin: 12px 16px 0;
+  background: #fff8e1; border: 1px solid #f9a825; border-radius: 12px;
+  padding: 14px 16px; text-align: left; cursor: pointer;
+  font-size: 15px; font-weight: 600; color: #7d5a00;
+  transition: background .15s;
+}
+.triage-banner:hover { background: #fff3cd; }
+
+/* ── Triage screen ────────────────────────────────────────────────────────── */
+.triage-screen {
+  display: flex; flex-direction: column;
+  min-height: 100%;
+}
+
+.triage-screen .screen-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 16px;
+}
+
+.triage-nav-btn {
+  background: none; border: none; cursor: pointer;
+  font-size: 20px; color: var(--text-secondary); padding: 4px 8px;
+  border-radius: 6px; line-height: 1;
+}
+.triage-nav-btn:hover:not(:disabled) { background: var(--bg); color: var(--text); }
+.triage-nav-btn:disabled { opacity: .3; cursor: not-allowed; }
+
+.triage-nav-arrows { display: flex; gap: 4px; }
+
+.triage-progress {
+  font-size: 13px; color: var(--text-secondary); font-weight: 500;
+}
+
+.triage-card-wrapper {
+  flex: 1; display: flex; align-items: flex-start;
+  padding: 16px;
+}
+
+/* ── Triage card ──────────────────────────────────────────────────────────── */
+.triage-card {
+  width: 100%; background: var(--surface); border-radius: 16px;
+  padding: 20px 16px; box-shadow: 0 2px 12px rgba(0,0,0,.06);
+  display: flex; flex-direction: column; gap: 10px;
+}
+
+.triage-card-type {
+  font-size: 13px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--text-secondary);
+}
+.triage-card--income .triage-card-type { color: var(--positive); }
+.triage-card--transfer .triage-card-type { color: var(--accent); }
+
+.triage-card-amount {
+  font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.triage-card-amount--positive { color: var(--positive); }
+.triage-card-amount--negative { color: var(--negative); }
+
+.triage-card-payee { font-size: 17px; font-weight: 600; }
+
+.triage-card-meta {
+  display: flex; gap: 12px; font-size: 13px; color: var(--text-secondary);
+}
+
+.triage-pair-match {
+  font-size: 13px; color: var(--accent); font-weight: 500;
+  background: #eef3fb; border-radius: 8px; padding: 6px 10px;
+}
+
+/* ── Category picker ──────────────────────────────────────────────────────── */
+.triage-category-list {
+  max-height: 40vh; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 10px;
+  display: flex; flex-direction: column;
+}
+
+.triage-category-item {
+  width: 100%; background: none; border: none; border-bottom: 1px solid var(--border);
+  padding: 11px 14px; text-align: left; cursor: pointer; font-size: 14px;
+  color: var(--text); transition: background .1s;
+}
+.triage-category-item:last-child { border-bottom: none; }
+.triage-category-item:hover { background: var(--bg); }
+.triage-category-item.selected { background: #eef3fb; color: var(--accent); font-weight: 600; }
+
+.triage-category-item--rta { color: var(--text-secondary); font-style: italic; }
+.triage-category-item--rta.selected { color: var(--accent); font-style: italic; }
+
+.triage-category-item--suggested { font-weight: 600; background: #f9fbe7; }
+.triage-category-item--suggested.selected { background: #eef3fb; color: var(--accent); }
+
+/* ── Triage actions row ───────────────────────────────────────────────────── */
+.triage-actions { margin-top: 4px; }
+.triage-actions .btn-primary { width: 100%; }
+.triage-actions .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+
+.triage-escape-hatch {
+  background: none; border: none; cursor: pointer;
+  font-size: 13px; color: var(--text-secondary); text-align: center;
+  padding: 4px 0; align-self: center;
+}
+.triage-escape-hatch:hover { color: var(--text); }
+
+/* ── Type selector pills ──────────────────────────────────────────────────── */
+.triage-type-selector {
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.triage-type-selector--large { justify-content: center; margin-top: 12px; }
+
+.triage-type-pill {
+  flex: 1; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 8px; font-size: 14px; font-weight: 600;
+  cursor: pointer; text-align: center; transition: background .1s, border-color .1s;
+}
+.triage-type-pill:hover { background: #eef3fb; border-color: var(--accent); color: var(--accent); }
+
+/* ── Skip row ─────────────────────────────────────────────────────────────── */
+.triage-skip-row {
+  padding: 0 16px 16px; display: flex; justify-content: space-between;
+}
+.btn-ghost {
+  background: none; border: none; cursor: pointer;
+  font-size: 14px; color: var(--text-secondary); padding: 8px 20px;
+}
+.btn-ghost:hover { color: var(--text); }
+.btn-ghost:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ── All caught up ────────────────────────────────────────────────────────── */
+.triage-all-caught-up {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 16px;
+  padding: 32px;
+}
+.triage-caught-up-emoji { font-size: 56px; }
+.triage-caught-up-text { font-size: 22px; font-weight: 700; }
+.triage-all-caught-up .btn-secondary { min-width: 160px; }

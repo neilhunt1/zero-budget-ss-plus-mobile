@@ -153,15 +153,59 @@ export async function updateTransactionFields(
 }
 
 /**
+ * Derive the semantic transaction type from a transaction's fields.
+ * Handles both new-style values ('income'|'transfer'|'regular') and legacy
+ * values ('debit'|'credit'|'transfer') that may exist in older sheet data.
+ */
+export function classifyTransactionType(tx: Transaction): TransactionType | '' {
+  if (['income', 'transfer', 'regular'].includes(tx.transaction_type)) {
+    return tx.transaction_type as TransactionType;
+  }
+  // Legacy mappings
+  if (tx.transaction_type === 'debit') return 'regular';
+  // 'credit_payment' was an old enum value before it was merged into 'transfer'
+  if (tx.transaction_type === 'transfer' || (tx.transaction_type as string) === 'credit_payment') return 'transfer';
+  if (tx.transaction_type === 'credit') {
+    return tx.inflow > 0 && !tx.category ? 'income' : 'regular';
+  }
+  // Blank — infer from data
+  if (tx.inflow > 0 && !tx.category) return 'income';
+  if (tx.transfer_pair_id) return 'transfer';
+  if (tx.outflow > 0 || (tx.inflow > 0 && tx.category)) return 'regular';
+  return '';
+}
+
+/**
+ * Scan a list of transactions for a matching transfer pair.
+ * Looks for a different-account transaction within ±7 days with the same amount (±$0.01).
+ */
+export function findTransferPair(
+  tx: Transaction,
+  allTxns: Transaction[]
+): Transaction | null {
+  const amount = tx.outflow || tx.inflow;
+  const txTime = new Date(tx.date).getTime();
+  return (
+    allTxns.find((other) => {
+      if (other.transaction_id === tx.transaction_id || other.account === tx.account) return false;
+      const otherAmount = other.outflow || other.inflow;
+      if (Math.abs(otherAmount - amount) > 0.01) return false;
+      const daysDiff = Math.abs(new Date(other.date).getTime() - txTime) / 86_400_000;
+      return daysDiff <= 7;
+    }) ?? null
+  );
+}
+
+/**
  * Compute per-category activity (outflow − inflow) for a set of transactions.
- * Transfers are excluded — they have no budget impact.
+ * Transfers and income are excluded — they have no budget category impact.
  */
 export function computeCategoryActivity(
   transactions: Transaction[]
 ): Map<string, number> {
   const map = new Map<string, number>();
   for (const tx of transactions) {
-    if (!tx.category || tx.transaction_type === 'transfer') continue;
+    if (!tx.category || tx.transaction_type === 'transfer' || tx.transaction_type === 'income') continue;
     map.set(tx.category, (map.get(tx.category) ?? 0) + tx.outflow - tx.inflow);
   }
   return map;

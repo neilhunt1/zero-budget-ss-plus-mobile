@@ -1,31 +1,24 @@
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 
-const NAV_ITEMS = [
-  { to: '/plan', label: 'Plan' },
-  { to: '/accounts', label: 'Accounts' },
-  { to: '/reflect', label: 'Reflect' },
-];
-
-/**
- * Fixed bottom navigation bar (mobile-first).
- * Only rendered when the user is authenticated.
- */
-export default function NavBar() {
+export default function NavBar({ unreviewedCount }: { unreviewedCount: number | null }) {
   const { signOut } = useAuth();
+  const badge = unreviewedCount != null && unreviewedCount > 0 ? unreviewedCount : null;
 
   return (
     <nav className="navbar">
+      <div className="navbar-brand">Zero Budget</div>
       <div className="navbar-tabs">
-        {NAV_ITEMS.map(({ to, label }) => (
-          <NavLink
-            key={to}
-            to={to}
-            className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
-          >
-            {label}
-          </NavLink>
-        ))}
+        <NavLink to="/plan" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
+          Plan
+        </NavLink>
+        <NavLink to="/accounts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
+          Accounts
+          {badge && <span className="nav-badge">{badge}</span>}
+        </NavLink>
+        <NavLink to="/reflect" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
+          Reflect
+        </NavLink>
       </div>
       <button className="nav-signout" onClick={signOut} title="Sign out">
         ⏏

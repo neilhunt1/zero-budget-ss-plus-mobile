@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useSheetSync } from '../hooks/useSheetSync';
 import { SheetsClient } from '../api/client';
@@ -44,8 +45,9 @@ function buildAccountSummaries(transactions: Transaction[]): AccountSummary[] {
   return [...map.values()].sort((a, b) => b.balance - a.balance);
 }
 
-export default function Accounts() {
+export default function Accounts({ unreviewedCount }: { unreviewedCount: number | null }) {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const revision = useSheetSync(token);
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,6 +84,12 @@ export default function Accounts() {
 
       {!loading && !error && (
         <>
+          {unreviewedCount != null && unreviewedCount > 0 && (
+            <button className="triage-banner" onClick={() => navigate('/triage')}>
+              {unreviewedCount} transaction{unreviewedCount !== 1 ? 's' : ''} to review →
+            </button>
+          )}
+
           <div className="accounts-total">
             <span className="accounts-total-label">Net Worth (from transactions)</span>
             <span className={`accounts-total-value ${totalBalance < 0 ? 'negative' : ''}`}>
