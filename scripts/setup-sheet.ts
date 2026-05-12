@@ -139,7 +139,6 @@ const TABS_IN_ORDER = [
   "Transactions (BTS)",
   "Balance History (BTS)",
   "YNAB_Plan_Import",
-  "YNAB_Transactions_Import",
 ];
 
 const BUDGET_CALCS_COLUMNS = ["month", "category", "activity", "assigned", "available"];
@@ -862,7 +861,7 @@ async function hideYnabTabs(
   sheetId: string,
   sheetMeta: sheets_v4.Schema$Sheet[]
 ): Promise<void> {
-  const tabsToHide = ["YNAB_Plan_Import", "YNAB_Transactions_Import"];
+  const tabsToHide = ["YNAB_Plan_Import"];
   const requests: sheets_v4.Schema$Request[] = [];
 
   for (const title of tabsToHide) {
