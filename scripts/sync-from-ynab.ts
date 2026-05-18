@@ -368,11 +368,17 @@ async function readAccountBalances(
 
   const headers = rows[0].map((h: string) => h.toLowerCase().trim());
   const accountCol = headers.findIndex((h) => /account/i.test(h));
-  const balanceCol = headers.findIndex((h) => /balance/i.test(h));
+  // BankToSheets uses "current" for the running account balance.
+  // Fall back to any column containing "balance" for other schema variants.
+  const balanceCol =
+    headers.findIndex((h) => h === 'current') >= 0
+      ? headers.findIndex((h) => h === 'current')
+      : headers.findIndex((h) => /balance/i.test(h));
 
   if (accountCol === -1 || balanceCol === -1) {
     log(
       `Balance History (BTS): could not find account/balance columns.\n` +
+      `  Expected: "account" and "current" (or "balance").\n` +
       `  Headers found: ${headers.join(', ')}`
     );
     return [];
