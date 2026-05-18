@@ -1,5 +1,5 @@
 import { SheetsClient } from './client';
-import { BudgetCategory, BudgetAssignment, CategoryType, CategoryWithActivity, GroupedBudget, CategoryCalcs } from '../types';
+import { BudgetCategory, BudgetAssignment, BudgetCalcEntry, CategoryType, CategoryWithActivity, GroupedBudget, CategoryCalcs } from '../types';
 
 // Column order must match scripts/setup-sheet.ts BUDGET_CATEGORY_COLUMNS exactly.
 const CATEGORY_COLS = [
@@ -50,16 +50,61 @@ export async function fetchReadyToAssign(client: SheetsClient): Promise<number> 
 }
 
 /**
- * Fetch all active budget categories from the Budget tab.
- * Sorted by sort_order ascending.
+ * Fetch budget categories from the Budget tab, sorted by sort_order.
+ * Pass `{ activeOnly: false }` to include inactive categories (used by sync layer).
  */
-export async function fetchBudgetCategories(client: SheetsClient): Promise<BudgetCategory[]> {
+export async function fetchBudgetCategories(
+  client: SheetsClient,
+  { activeOnly = true }: { activeOnly?: boolean } = {}
+): Promise<BudgetCategory[]> {
   const res = await client.getValues(`Budget!A${CATEGORIES_START_ROW}:G${CATEGORIES_END_ROW}`);
   const rows = res.values ?? [];
   return rows
     .map((row, i) => parseCategoryRow(row, i + CATEGORIES_START_ROW))
-    .filter((c) => c.category && c.active)
+    .filter((c) => c.category && (activeOnly ? c.active : true))
     .sort((a, b) => a.sort_order - b.sort_order);
+}
+
+/**
+ * Fetch all budget assignments across all months (used by the sync layer to populate IndexedDB).
+ */
+export async function fetchAllAssignments(client: SheetsClient): Promise<BudgetAssignment[]> {
+  const res = await client.getValues(`Budget!A${ASSIGNMENTS_START_ROW + 1}:D`);
+  const rows = res.values ?? [];
+  return rows
+    .map(
+      (row, i): BudgetAssignment => ({
+        month: row[0] ?? '',
+        category: row[1] ?? '',
+        assigned: parseFloat(row[2]) || 0,
+        source: row[3] ?? 'manual',
+        _rowIndex: ASSIGNMENTS_START_ROW + 1 + i,
+      })
+    )
+    .filter((a) => a.month && a.category);
+}
+
+/**
+ * Fetch all Budget_Calcs rows as a flat array (used by the sync layer to populate IndexedDB).
+ * Includes every month, not just the current one.
+ */
+export async function fetchAllCategoryCalcEntries(client: SheetsClient): Promise<BudgetCalcEntry[]> {
+  const res = await client.getValues('Budget_Calcs!A:E');
+  const rows = res.values ?? [];
+  const entries: BudgetCalcEntry[] = [];
+  for (let i = 1; i < rows.length; i++) { // row 0 is header
+    const row = rows[i];
+    const month = row[0] ?? '';
+    const category = row[1] ?? '';
+    if (!month || !category) continue;
+    entries.push({
+      month,
+      category,
+      activity: parseFloat(row[2]) || 0,
+      available: parseFloat(row[4]) || 0,
+    });
+  }
+  return entries;
 }
 
 /**

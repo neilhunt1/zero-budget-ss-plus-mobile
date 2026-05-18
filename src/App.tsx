@@ -6,6 +6,7 @@ import { useAppBadge } from './hooks/useAppBadge';
 import AuthGate from './components/AuthGate';
 import NavBar from './components/NavBar';
 import OfflineBanner from './components/OfflineBanner';
+import SyncProgress from './components/SyncProgress';
 import Plan from './screens/Plan';
 import Accounts from './screens/Accounts';
 import Reflect from './screens/Reflect';
@@ -27,6 +28,7 @@ export default function App() {
     <HashRouter>
       <div className="app">
         {isAuthenticated && <AppBadge onCount={handleCount} />}
+        <SyncProgress />
         <OfflineBanner />
         {isAuthenticated && <NavBar unreviewedCount={unreviewedCount} />}
         <main className="main-content">
