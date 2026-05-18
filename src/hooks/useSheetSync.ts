@@ -34,6 +34,35 @@ export function useSheetSync(token: string | null, intervalMs = 15_000): void {
   const disabledRef = useRef(false); // set true if Drive scope is missing (403)
   const syncingRef = useRef(false);  // prevent concurrent syncs
   const sheetId = import.meta.env.VITE_GOOGLE_SHEET_ID as string | undefined;
+  // Exposed so the SW message listener can trigger a check without closing over stale state.
+  const checkRef = useRef<(() => void) | null>(null);
+
+  // Register PWA periodic background sync (Chrome/Edge only).
+  // When the periodicsync event fires in the SW, it messages active clients,
+  // and this listener triggers a Drive version check + sync if stale.
+  useEffect(() => {
+    navigator.serviceWorker?.ready
+      .then((reg) => {
+        if ('periodicSync' in reg) {
+          return (reg as unknown as { periodicSync: { register(tag: string, opts: object): Promise<void> } })
+            .periodicSync.register('budget-sync', { minInterval: 12 * 60 * 60 * 1000 });
+        }
+      })
+      .catch(() => {
+        // periodicSync not supported or permission denied — silent fallback.
+        // The app still syncs on every open via the Drive version poll.
+      });
+
+    const handleSWMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'PERIODIC_SYNC') {
+        checkRef.current?.();
+      }
+    };
+    navigator.serviceWorker?.addEventListener('message', handleSWMessage);
+    return () => {
+      navigator.serviceWorker?.removeEventListener('message', handleSWMessage);
+    };
+  }, []);
 
   useEffect(() => {
     if (!token || !sheetId || disabledRef.current) return;
@@ -76,6 +105,8 @@ export function useSheetSync(token: string | null, intervalMs = 15_000): void {
       }
     }
 
+    checkRef.current = checkForChanges;
+
     const handleVisibilityChange = () => {
       if (!document.hidden) checkForChanges();
     };
@@ -84,6 +115,7 @@ export function useSheetSync(token: string | null, intervalMs = 15_000): void {
     checkForChanges();
     const timerId = setInterval(checkForChanges, intervalMs);
     return () => {
+      checkRef.current = null;
       clearInterval(timerId);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
