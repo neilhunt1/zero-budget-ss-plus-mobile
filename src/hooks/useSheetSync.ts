@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { db } from '../db/schema';
 import { syncOnOpen } from '../db/sync';
 
@@ -30,8 +30,7 @@ const DRIVE_FILE_URL = (fileId: string) =>
  *   - Polling pauses automatically when the page is hidden (Page Visibility API).
  *   - If the stored IndexedDB version matches Drive, the sync is skipped entirely.
  */
-export function useSheetSync(token: string | null, intervalMs = 15_000): number {
-  const [revision, setRevision] = useState(0);
+export function useSheetSync(token: string | null, intervalMs = 15_000): void {
   const disabledRef = useRef(false); // set true if Drive scope is missing (403)
   const syncingRef = useRef(false);  // prevent concurrent syncs
   const sheetId = import.meta.env.VITE_GOOGLE_SHEET_ID as string | undefined;
@@ -68,7 +67,6 @@ export function useSheetSync(token: string | null, intervalMs = 15_000): number 
         syncingRef.current = true;
         try {
           await syncOnOpen(token!, sheetId!, version);
-          setRevision((r) => r + 1);
         } finally {
           syncingRef.current = false;
         }
@@ -90,6 +88,4 @@ export function useSheetSync(token: string | null, intervalMs = 15_000): number 
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [token, sheetId, intervalMs]);
-
-  return revision;
 }

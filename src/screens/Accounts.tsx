@@ -1,12 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../hooks/useAuth';
-import { useSheetSync } from '../hooks/useSheetSync';
-import { SheetsClient } from '../api/client';
-import { fetchTransactions } from '../api/transactions';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '../db/schema';
 import { Transaction } from '../types';
-
-const SHEET_ID = import.meta.env.VITE_GOOGLE_SHEET_ID as string;
 
 interface AccountSummary {
   name: string;
@@ -46,31 +42,14 @@ function buildAccountSummaries(transactions: Transaction[]): AccountSummary[] {
 }
 
 export default function Accounts({ unreviewedCount }: { unreviewedCount: number | null }) {
-  const { token } = useAuth();
   const navigate = useNavigate();
-  const revision = useSheetSync(token);
-  const [accounts, setAccounts] = useState<AccountSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!token) return;
-    const client = new SheetsClient(SHEET_ID, token);
-    setLoading(true);
-    setError(null);
-
-    try {
-      const transactions = await fetchTransactions(client);
-      setAccounts(buildAccountSummaries(transactions));
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [token, revision]); // revision triggers re-fetch when sheet changes
-
-  useEffect(() => { load(); }, [load]);
-
+  const allTransactions = useLiveQuery(() => db.transactions.toArray());
+  const loading = allTransactions === undefined;
+  const accounts = useMemo(
+    () => buildAccountSummaries(allTransactions ?? []),
+    [allTransactions]
+  );
   const totalBalance = accounts.reduce((s, a) => s + a.balance, 0);
 
   return (
@@ -80,9 +59,8 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
       </header>
 
       {loading && <div className="state-msg">Loading…</div>}
-      {error && <div className="state-msg error">{error}</div>}
 
-      {!loading && !error && (
+      {!loading && (
         <>
           {unreviewedCount != null && unreviewedCount > 0 && (
             <button className="triage-banner" onClick={() => navigate('/triage')}>

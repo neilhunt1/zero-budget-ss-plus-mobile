@@ -4,6 +4,7 @@ import {
   fetchBudgetCategories,
   fetchAllAssignments,
   fetchAllCategoryCalcEntries,
+  fetchReadyToAssign,
 } from '../api/budget';
 import { db } from './schema';
 
@@ -85,16 +86,40 @@ export async function syncOnOpen(
     const calcs = await fetchAllCategoryCalcEntries(client);
     await db.budgetCalcs.bulkPut(calcs);
 
+    const readyToAssign = await fetchReadyToAssign(client);
+
     await db.syncMeta.put({
       key: 'all',
       lastSyncedAt: new Date().toISOString(),
       lastSheetVersion: sheetVersion,
       rowCount: transactions.length,
+      readyToAssign,
     });
 
     notify({ status: 'complete', loaded: transactions.length, total: transactions.length });
   } catch (e) {
     notify({ status: 'error', loaded: 0, total: null, error: String(e) });
     throw e;
+  }
+}
+
+/**
+ * Re-fetch budget assignments, calcs, and readyToAssign after a write operation,
+ * then push the updates into IndexedDB so useLiveQuery subscribers re-render.
+ *
+ * Does NOT re-sync transactions — call syncOnOpen for a full sync.
+ */
+export async function refreshMonthBudget(token: string, sheetId: string): Promise<void> {
+  const client = new SheetsClient(sheetId, token);
+  const [assignments, calcs, readyToAssign] = await Promise.all([
+    fetchAllAssignments(client),
+    fetchAllCategoryCalcEntries(client),
+    fetchReadyToAssign(client),
+  ]);
+  await db.budgetAssignments.bulkPut(assignments);
+  await db.budgetCalcs.bulkPut(calcs);
+  const lastSync = await db.syncMeta.get('all');
+  if (lastSync) {
+    await db.syncMeta.put({ ...lastSync, readyToAssign });
   }
 }

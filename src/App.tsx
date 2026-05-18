@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
+import { useSheetSync } from './hooks/useSheetSync';
 import { useUnreviewedCount } from './hooks/useUnreviewedCount';
 import { useAppBadge } from './hooks/useAppBadge';
 import AuthGate from './components/AuthGate';
@@ -20,7 +21,8 @@ function AppBadge({ onCount }: { onCount: (n: number | null) => void }) {
 }
 
 export default function App() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, token } = useAuth();
+  useSheetSync(token); // Drive polling — writes to IndexedDB; screens react via useLiveQuery
   const [unreviewedCount, setUnreviewedCount] = useState<number | null>(null);
   const handleCount = useCallback((n: number | null) => setUnreviewedCount(n), []);
 

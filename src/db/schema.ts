@@ -6,6 +6,7 @@ export interface SyncMeta {
   lastSyncedAt: string;
   lastSheetVersion: string;
   rowCount: number;
+  readyToAssign?: number;
 }
 
 export class BudgetDatabase extends Dexie {

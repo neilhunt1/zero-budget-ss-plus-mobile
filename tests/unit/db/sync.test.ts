@@ -60,6 +60,7 @@ vi.mock('../../../src/api/budget', () => ({
   fetchAllCategoryCalcEntries: vi.fn().mockResolvedValue([
     { month: '2025-04', category: 'Groceries 🛒', activity: 50, available: 350 },
   ]),
+  fetchReadyToAssign: vi.fn().mockResolvedValue(1234),
 }));
 
 vi.mock('../../../src/api/client', () => ({

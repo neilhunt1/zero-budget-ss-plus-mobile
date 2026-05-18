@@ -1,11 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '../hooks/useAuth';
-import { useSheetSync } from '../hooks/useSheetSync';
-import { SheetsClient } from '../api/client';
-import { fetchTransactions, computeCategoryActivity } from '../api/transactions';
-import { fetchBudgetCategories, fetchMonthAssignments } from '../api/budget';
-
-const SHEET_ID = import.meta.env.VITE_GOOGLE_SHEET_ID as string;
+import { useState, useMemo } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { getTransactionsByMonth, getMonthAssignments } from '../db/queries';
+import { computeCategoryActivity } from '../api/transactions';
 
 function toYYYYMM(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -20,56 +16,27 @@ function fmt(n: number): string {
   });
 }
 
-interface MonthSummary {
-  totalInflow: number;
-  totalOutflow: number;
-  totalAssigned: number;
-  topCategories: Array<{ name: string; spent: number }>;
-  uncategorizedCount: number;
-}
-
 export default function Reflect() {
-  const { token } = useAuth();
-  const revision = useSheetSync(token);
   const [month, setMonth] = useState(() => toYYYYMM(new Date()));
-  const [summary, setSummary] = useState<MonthSummary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!token) return;
-    const client = new SheetsClient(SHEET_ID, token);
-    setLoading(true);
-    setError(null);
+  const transactions = useLiveQuery(() => getTransactionsByMonth(month), [month]);
+  const assignments = useLiveQuery(() => getMonthAssignments(month), [month]);
+  const loading = transactions === undefined || assignments === undefined;
 
-    try {
-      const [transactions, categories, assignments] = await Promise.all([
-        fetchTransactions(client, { month }),
-        fetchBudgetCategories(client),
-        fetchMonthAssignments(client, month),
-      ]);
-
-      const nonTransfers = transactions.filter((t) => t.transaction_type !== 'transfer');
-      const totalInflow = nonTransfers.reduce((s, t) => s + t.inflow, 0);
-      const totalOutflow = nonTransfers.reduce((s, t) => s + t.outflow, 0);
-      const totalAssigned = assignments.reduce((s, a) => s + a.assigned, 0);
-      const uncategorizedCount = nonTransfers.filter((t) => !t.category).length;
-
-      const activityMap = computeCategoryActivity(transactions);
-      const topCategories = [...activityMap.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([name, spent]) => ({ name, spent }));
-
-      setSummary({ totalInflow, totalOutflow, totalAssigned, topCategories, uncategorizedCount });
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [token, month, revision]); // revision triggers re-fetch when sheet changes
-
-  useEffect(() => { load(); }, [load]);
+  const summary = useMemo(() => {
+    if (!transactions || !assignments) return null;
+    const nonTransfers = transactions.filter((t) => t.transaction_type !== 'transfer');
+    const totalInflow = nonTransfers.reduce((s, t) => s + t.inflow, 0);
+    const totalOutflow = nonTransfers.reduce((s, t) => s + t.outflow, 0);
+    const totalAssigned = assignments.reduce((s, a) => s + a.assigned, 0);
+    const uncategorizedCount = nonTransfers.filter((t) => !t.category).length;
+    const activityMap = computeCategoryActivity(transactions);
+    const topCategories = [...activityMap.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, spent]) => ({ name, spent }));
+    return { totalInflow, totalOutflow, totalAssigned, topCategories, uncategorizedCount };
+  }, [transactions, assignments]);
 
   return (
     <div className="screen reflect-screen">
@@ -84,9 +51,8 @@ export default function Reflect() {
       </header>
 
       {loading && <div className="state-msg">Loading…</div>}
-      {error && <div className="state-msg error">{error}</div>}
 
-      {!loading && !error && summary && (
+      {!loading && summary && (
         <>
           <div className="reflect-stats">
             <div className="stat-card">
