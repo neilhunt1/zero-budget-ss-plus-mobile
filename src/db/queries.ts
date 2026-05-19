@@ -59,6 +59,16 @@ export async function getMonthAssignments(month: string): Promise<BudgetAssignme
   return db.budgetAssignments.where('month').equals(month).toArray();
 }
 
+export async function getSuggestedCategory(payee: string): Promise<string | null> {
+  const normalized = payee.toLowerCase();
+  const matches = await db.transactions
+    .filter((t) => t.reviewed && !!t.category && t.payee.toLowerCase() === normalized)
+    .toArray();
+  if (matches.length === 0) return null;
+  matches.sort((a, b) => b.date.localeCompare(a.date));
+  return matches[0].category;
+}
+
 export async function getBudgetForMonth(month: string): Promise<GroupedBudget[]> {
   const [categories, assignments, calcs] = await Promise.all([
     getActiveBudgetCategories(),

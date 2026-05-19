@@ -7,7 +7,7 @@ import {
   classifyTransactionType,
   findTransferPair,
 } from '../api/transactions';
-import { getActiveBudgetCategories } from '../db/queries';
+import { getActiveBudgetCategories, getSuggestedCategory } from '../db/queries';
 import {
   optimisticApproveIncome,
   optimisticConfirmTransfer,
@@ -124,6 +124,7 @@ function PurchaseCard({
   tx,
   categories,
   selectedCategory,
+  suggestedCategory,
   onSelectCategory,
   onAssign,
   onTypeOverride,
@@ -133,6 +134,7 @@ function PurchaseCard({
   tx: Transaction;
   categories: BudgetCategory[];
   selectedCategory: string;
+  suggestedCategory: string;
   onSelectCategory: (cat: string) => void;
   onAssign: () => void;
   onTypeOverride: (type: TransactionType) => void;
@@ -141,7 +143,7 @@ function PurchaseCard({
 }) {
   const RTA_VALUE = '__rta__';
 
-  const suggested = tx.suggested_category;
+  const suggested = suggestedCategory;
   const others = categories.filter((c) => c.category !== suggested);
 
   return (
@@ -240,6 +242,7 @@ export default function Triage() {
 
   const [index, setIndex] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState('');
+  const [resolvedSuggestion, setResolvedSuggestion] = useState('');
   const [overrideType, setOverrideType] = useState<TransactionType | null>(null);
   const [escapeOpen, setEscapeOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -252,6 +255,17 @@ export default function Triage() {
     setSelectedCategory(tx.category ?? '');
     setOverrideType(null);
     setEscapeOpen(false);
+    setResolvedSuggestion('');
+
+    // Resolve suggestion: payee history first, then Plaid hint as fallback
+    getSuggestedCategory(tx.payee).then((payeeSuggestion) => {
+      const suggestion = payeeSuggestion ?? tx.suggested_category ?? '';
+      setResolvedSuggestion(suggestion);
+      // Pre-select only if no category is already assigned
+      if (!tx.category && suggestion) {
+        setSelectedCategory(suggestion);
+      }
+    });
   }, [tx?.transaction_id, index]);
 
   const advance = () => setIndex((i) => i + 1);
@@ -372,6 +386,7 @@ export default function Triage() {
             tx={tx}
             categories={categories}
             selectedCategory={selectedCategory}
+            suggestedCategory={resolvedSuggestion}
             onSelectCategory={setSelectedCategory}
             onAssign={handleAssignPurchase}
             onTypeOverride={handleTypeOverride}

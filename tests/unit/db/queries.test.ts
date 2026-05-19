@@ -9,6 +9,7 @@ import {
   getUnreviewedCount,
   getActiveBudgetCategories,
   getMonthAssignments,
+  getSuggestedCategory,
 } from '../../../src/db/queries';
 import type { Transaction, BudgetCategory, BudgetAssignment } from '../../../src/types';
 
@@ -225,6 +226,57 @@ describe('getActiveBudgetCategories', () => {
 
     const result = await getActiveBudgetCategories();
     expect(result.map((c) => c.category)).toEqual(['A', 'B']);
+  });
+});
+
+describe('getSuggestedCategory', () => {
+  beforeEach(resetDb);
+
+  it('returns category of most recent reviewed transaction with matching payee', async () => {
+    await db.transactions.bulkPut([
+      makeTx({ transaction_id: 'old', payee: 'Countdown', date: '2025-03-01', reviewed: true, category: 'Groceries 🛒' }),
+      makeTx({ transaction_id: 'new', payee: 'Countdown', date: '2025-04-01', reviewed: true, category: 'Household 🏠' }),
+    ]);
+
+    expect(await getSuggestedCategory('Countdown')).toBe('Household 🏠');
+  });
+
+  it('is case-insensitive', async () => {
+    await db.transactions.bulkPut([
+      makeTx({ transaction_id: 'a', payee: 'COUNTDOWN', reviewed: true, category: 'Groceries 🛒' }),
+    ]);
+
+    expect(await getSuggestedCategory('countdown')).toBe('Groceries 🛒');
+    expect(await getSuggestedCategory('Countdown')).toBe('Groceries 🛒');
+    expect(await getSuggestedCategory('COUNTDOWN')).toBe('Groceries 🛒');
+  });
+
+  it('ignores unreviewed transactions', async () => {
+    await db.transactions.bulkPut([
+      makeTx({ transaction_id: 'a', payee: 'Countdown', reviewed: false, category: 'Groceries 🛒' }),
+    ]);
+
+    expect(await getSuggestedCategory('Countdown')).toBeNull();
+  });
+
+  it('ignores transactions with empty category', async () => {
+    await db.transactions.bulkPut([
+      makeTx({ transaction_id: 'a', payee: 'Countdown', reviewed: true, category: '' }),
+    ]);
+
+    expect(await getSuggestedCategory('Countdown')).toBeNull();
+  });
+
+  it('returns null when no matching payee found', async () => {
+    await db.transactions.bulkPut([
+      makeTx({ transaction_id: 'a', payee: 'Petrol Station', reviewed: true, category: 'Fuel ⛽' }),
+    ]);
+
+    expect(await getSuggestedCategory('Countdown')).toBeNull();
+  });
+
+  it('returns null for empty db', async () => {
+    expect(await getSuggestedCategory('Countdown')).toBeNull();
   });
 });
 
