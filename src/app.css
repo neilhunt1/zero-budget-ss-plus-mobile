@@ -256,6 +256,79 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .account-balance { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .accounts-note { padding: 16px; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
 
+/* ── Transaction list (Accounts screen) ──────────────────────────────────── */
+.tx-list-section-header {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 14px 16px 6px; background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.tx-list-section-title {
+  font-size: 12px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .5px; color: var(--text-secondary);
+}
+.tx-list-section-sub { font-size: 12px; color: var(--text-secondary); }
+
+.filter-chips {
+  display: flex; gap: 8px; padding: 10px 16px;
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+}
+.filter-chips::-webkit-scrollbar { display: none; }
+.filter-chip {
+  flex-shrink: 0; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 20px; padding: 5px 14px; font-size: 13px; font-weight: 500;
+  cursor: pointer; color: var(--text-secondary); white-space: nowrap;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.filter-chip:hover { border-color: var(--accent); color: var(--accent); }
+.filter-chip--active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.filter-chip--active:hover { background: var(--accent-dark); border-color: var(--accent-dark); }
+
+/* Status dots */
+.dot {
+  flex-shrink: 0; width: 10px; height: 10px; border-radius: 50%; margin-top: 4px;
+}
+.dot--red    { background: #e53935; }
+.dot--orange { background: #f57c00; }
+.dot--green  { background: #2d8a4e; }
+
+/* Transaction rows */
+.tx-list { border-top: 1px solid var(--border); }
+.tx-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 12px 16px; width: 100%;
+  background: var(--surface); border: none; border-bottom: 1px solid var(--border);
+  text-align: left; cursor: pointer; font: inherit;
+  transition: background .12s;
+}
+.tx-row:hover { background: #f8faff; }
+.tx-row-main { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tx-payee { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tx-meta { font-size: 12px; color: var(--text-secondary); }
+.tx-category { font-size: 12px; color: var(--text-secondary); }
+.tx-category--none { color: var(--negative); font-weight: 600; }
+.tx-amount { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; align-self: center; }
+.tx-amount--inflow  { color: var(--positive); }
+.tx-amount--outflow { color: var(--negative); }
+
+/* ── Transaction detail screen ────────────────────────────────────────────── */
+.tx-detail-hero {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 24px 16px 20px; background: var(--surface);
+  border-bottom: 1px solid var(--border); gap: 4px;
+}
+.tx-detail-amount { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tx-detail-payee { font-size: 17px; font-weight: 600; text-align: center; }
+.tx-detail-date { font-size: 13px; color: var(--text-secondary); }
+
+.detail-section { padding: 8px 0; }
+.detail-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 11px 16px; border-bottom: 1px solid var(--border); background: var(--surface);
+}
+.detail-label { font-size: 13px; color: var(--text-secondary); flex-shrink: 0; }
+.detail-value { font-size: 14px; font-weight: 500; text-align: right; word-break: break-word; margin-left: 12px; }
+
 /* ── Reflect screen ───────────────────────────────────────────────────────── */
 .reflect-stats {
   display: grid; grid-template-columns: 1fr 1fr; gap: 1px;

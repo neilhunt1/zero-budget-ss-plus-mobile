@@ -12,6 +12,7 @@ import Plan from './screens/Plan';
 import Accounts from './screens/Accounts';
 import Reflect from './screens/Reflect';
 import Triage from './screens/Triage';
+import TransactionDetail from './screens/TransactionDetail';
 
 function AppBadge({ onCount }: { onCount: (n: number | null) => void }) {
   const count = useUnreviewedCount();
@@ -65,6 +66,14 @@ export default function App() {
               element={
                 <AuthGate>
                   <Triage />
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/transactions/:id"
+              element={
+                <AuthGate>
+                  <TransactionDetail />
                 </AuthGate>
               }
             />
