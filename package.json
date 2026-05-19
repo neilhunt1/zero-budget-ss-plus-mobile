@@ -13,17 +13,19 @@
     "validate:categories": "ts-node --project tsconfig.scripts.json scripts/validate-categories.ts",
     "setup:dev": "ts-node --project tsconfig.scripts.json scripts/setup-sheet.ts --env dev",
     "setup:prod": "ts-node --project tsconfig.scripts.json scripts/setup-sheet.ts --env prod",
-    "sync-from-ynab:dev": "ts-node --project tsconfig.scripts.json scripts/sync-from-ynab.ts --env dev",
-    "sync-from-ynab:prod": "ts-node --project tsconfig.scripts.json scripts/sync-from-ynab.ts --env prod",
+    "import:ynab:plan:dev": "ts-node --project tsconfig.scripts.json scripts/sync-from-ynab.ts --env dev",
+    "import:ynab:plan:prod": "ts-node --project tsconfig.scripts.json scripts/sync-from-ynab.ts --env prod",
     "sync-from-prod-to-dev": "ts-node --project tsconfig.scripts.json scripts/sync-from-prod-to-dev.ts",
-    "import:ynab:dev": "ts-node --project tsconfig.scripts.json scripts/import-ynab-transactions.ts --env dev",
-    "import:ynab:prod": "ts-node --project tsconfig.scripts.json scripts/import-ynab-transactions.ts --env prod",
+    "import:ynab:register:dev": "ts-node --project tsconfig.scripts.json scripts/import-ynab-transactions.ts --env dev",
+    "import:ynab:register:prod": "ts-node --project tsconfig.scripts.json scripts/import-ynab-transactions.ts --env prod",
     "test:integration": "vitest run tests/integration --passWithNoTests"
   },
   "dependencies": {
     "@react-oauth/google": "^0.12.1",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
+    "dexie": "^4.4.2",
+    "dexie-react-hooks": "^4.4.0",
     "dotenv": "^16.4.5",
     "googleapis": "^144.0.0",
     "react": "^18.3.1",
@@ -40,12 +42,14 @@
     "@vitejs/plugin-react": "^4.3.1",
     "@vitest/coverage-v8": "^2.1.0",
     "@vitest/ui": "^2.1.0",
+    "fake-indexeddb": "^6.2.5",
     "jsdom": "^29.1.0",
     "sharp": "^0.34.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.0",
     "vite": "^5.3.0",
     "vite-plugin-pwa": "^1.3.0",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "workbox-precaching": "^7.4.1"
   }
 }

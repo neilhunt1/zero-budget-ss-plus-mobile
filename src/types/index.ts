@@ -72,6 +72,14 @@ export interface Template {
 
 // ─── Derived / Computed ────────────────────────────────────────────────────────
 
+/** One row from Budget_Calcs, stored in IndexedDB for instant budget queries. */
+export interface BudgetCalcEntry {
+  month: string; // YYYY-MM
+  category: string;
+  activity: number;
+  available: number;
+}
+
 /** Pre-calculated activity and available for one category in one month, from Budget_Calcs tab. */
 export interface CategoryCalcs {
   activity: number; // outflow − inflow for the month

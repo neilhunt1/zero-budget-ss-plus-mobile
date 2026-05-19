@@ -12,8 +12,13 @@
  *   5. Appends new rows and marks probable duplicates
  *
  * Usage:
- *   npm run import:ynab:dev -- --file ~/Downloads/ynab-export.csv --cutover-date 2026-04-30
- *   npm run import:ynab:prod -- --file ~/Downloads/ynab-export.csv --cutover-date 2026-04-30
+ *   npm run import:ynab:register:dev
+ *   npm run import:ynab:register:dev -- --file ~/Downloads/register.csv --cutover-date 2026-04-30
+ *   npm run import:ynab:register:prod
+ *
+ * Defaults:
+ *   --file          data/ynab/register.csv  (relative to project root)
+ *   --cutover-date  today (YYYY-MM-DD)
  *
  * Idempotency contract:
  *   - Re-running with the same CSV produces no new rows (tier-1 exact dedup)
@@ -559,17 +564,20 @@ function parseArgs(): CliArgs {
     return args[idx + 1] ?? null;
   };
 
-  const filePath = get('--file');
-  const cutoverDate = get('--cutover-date');
+  const rawFile = get('--file') ?? 'data/ynab/register.csv';
+  const cutoverDate = get('--cutover-date') ?? new Date().toISOString().slice(0, 10);
 
-  if (!filePath) bail('--file <path> is required. Example: --file ~/Downloads/ynab-export.csv');
-  if (!cutoverDate) bail('--cutover-date <YYYY-MM-DD> is required. Example: --cutover-date 2026-04-30');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(cutoverDate)) {
     bail(`--cutover-date must be in YYYY-MM-DD format, got: "${cutoverDate}"`);
   }
 
-  const resolved = filePath.replace(/^~/, process.env.HOME ?? '~');
-  if (!fs.existsSync(resolved)) bail(`File not found: ${resolved}`);
+  const resolved = path.resolve(process.cwd(), rawFile.replace(/^~/, process.env.HOME ?? '~'));
+  if (!fs.existsSync(resolved)) {
+    bail(
+      `File not found: ${resolved}\n` +
+      `  Put your YNAB register export at data/ynab/register.csv, or pass --file <path>.`
+    );
+  }
 
   return { filePath: resolved, cutoverDate };
 }

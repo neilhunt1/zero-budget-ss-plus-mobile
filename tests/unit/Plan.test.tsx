@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import type { BudgetAssignment, CategoryWithActivity, GroupedBudget } from '../../src/types';
+import type { BudgetAssignment, BudgetCategory, CategoryWithActivity, GroupedBudget } from '../../src/types';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -9,19 +9,51 @@ vi.mock('../../src/hooks/useAuth', () => ({
   useAuth: () => ({ token: 'fake-token' }),
 }));
 
-vi.mock('../../src/hooks/useSheetSync', () => ({
-  useSheetSync: () => 0,
-}));
-
 vi.mock('../../src/api/client', () => ({
   SheetsClient: vi.fn(),
 }));
 
-const mockFetchBudgetCategories = vi.fn().mockResolvedValue([]);
-const mockFetchMonthAssignments = vi.fn().mockResolvedValue([]);
-const mockFetchCategoryCalcs = vi.fn().mockResolvedValue(new Map());
-const mockFetchReadyToAssign = vi.fn().mockResolvedValue(0);
-const mockBuildGroupedBudget = vi.fn().mockReturnValue([]);
+// useLiveQuery: async-to-state shim so components behave like in a real React tree
+vi.mock('dexie-react-hooks', async () => {
+  const { useState, useEffect } = await import('react');
+  return {
+    useLiveQuery: (fn: () => Promise<unknown> | unknown, deps: unknown[] = []) => {
+      const [val, setVal] = useState<unknown>(undefined);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      useEffect(() => { Promise.resolve(fn()).then(setVal); }, deps);
+      return val;
+    },
+  };
+});
+
+const mockGetBudgetForMonth = vi.fn().mockResolvedValue([]);
+const mockGetMonthAssignments = vi.fn().mockResolvedValue([]);
+const mockGetActiveBudgetCategories = vi.fn().mockResolvedValue([]);
+const mockDbSyncMetaGet = vi.fn().mockResolvedValue({ readyToAssign: 0 });
+const mockDbAssignmentsPut = vi.fn().mockResolvedValue(undefined);
+const mockDbAssignmentsBulkPut = vi.fn().mockResolvedValue(undefined);
+
+vi.mock('../../src/db/queries', () => ({
+  getBudgetForMonth: (...args: unknown[]) => mockGetBudgetForMonth(...args),
+  getMonthAssignments: (...args: unknown[]) => mockGetMonthAssignments(...args),
+  getActiveBudgetCategories: () => mockGetActiveBudgetCategories(),
+}));
+
+vi.mock('../../src/db/schema', () => ({
+  db: {
+    syncMeta: { get: (...args: unknown[]) => mockDbSyncMetaGet(...args) },
+    budgetAssignments: {
+      put: (...args: unknown[]) => mockDbAssignmentsPut(...args),
+      bulkPut: (...args: unknown[]) => mockDbAssignmentsBulkPut(...args),
+    },
+  },
+}));
+
+const mockRefreshMonthBudget = vi.fn().mockResolvedValue(undefined);
+vi.mock('../../src/db/sync', () => ({
+  refreshMonthBudget: (...args: unknown[]) => mockRefreshMonthBudget(...args),
+}));
+
 const mockUpsertAssignment = vi.fn().mockResolvedValue(undefined);
 const mockAppendLogEntry = vi.fn().mockResolvedValue(undefined);
 const mockApplyTemplate = vi.fn().mockResolvedValue(undefined);
@@ -29,11 +61,6 @@ const mockBatchUpsertAssignments = vi.fn().mockResolvedValue(undefined);
 const mockBatchAppendLogEntries = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../../src/api/budget', () => ({
-  fetchBudgetCategories: (...args: unknown[]) => mockFetchBudgetCategories(...args),
-  fetchMonthAssignments: (...args: unknown[]) => mockFetchMonthAssignments(...args),
-  fetchCategoryCalcs: (...args: unknown[]) => mockFetchCategoryCalcs(...args),
-  fetchReadyToAssign: (...args: unknown[]) => mockFetchReadyToAssign(...args),
-  buildGroupedBudget: (...args: unknown[]) => mockBuildGroupedBudget(...args),
   upsertAssignment: (...args: unknown[]) => mockUpsertAssignment(...args),
   appendLogEntry: (...args: unknown[]) => mockAppendLogEntry(...args),
   applyTemplate: (...args: unknown[]) => mockApplyTemplate(...args),
@@ -79,16 +106,13 @@ function makeGroupedBudget(cats: CategoryWithActivity[] = [makeCat()]): GroupedB
 describe('Plan screen — Ready to Assign', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFetchBudgetCategories.mockResolvedValue([]);
-    mockFetchMonthAssignments.mockResolvedValue([]);
-    mockFetchCategoryCalcs.mockResolvedValue(new Map());
-    mockBuildGroupedBudget.mockReturnValue([]);
-    mockUpsertAssignment.mockResolvedValue(undefined);
-    mockAppendLogEntry.mockResolvedValue(undefined);
+    mockGetBudgetForMonth.mockResolvedValue([]);
+    mockGetMonthAssignments.mockResolvedValue([]);
+    mockGetActiveBudgetCategories.mockResolvedValue([]);
   });
 
-  it('shows positive Ready to Assign from the sheet formula in green', async () => {
-    mockFetchReadyToAssign.mockResolvedValue(300);
+  it('shows positive Ready to Assign from syncMeta in green', async () => {
+    mockDbSyncMetaGet.mockResolvedValue({ readyToAssign: 300 });
 
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
@@ -102,8 +126,8 @@ describe('Plan screen — Ready to Assign', () => {
     expect(valueEl).not.toHaveClass('negative');
   });
 
-  it('shows negative Ready to Assign from the sheet formula in red', async () => {
-    mockFetchReadyToAssign.mockResolvedValue(-300);
+  it('shows negative Ready to Assign from syncMeta in red', async () => {
+    mockDbSyncMetaGet.mockResolvedValue({ readyToAssign: -300 });
 
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
@@ -121,13 +145,13 @@ describe('Plan screen — Ready to Assign', () => {
 describe('Plan screen — assign money', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFetchBudgetCategories.mockResolvedValue([]);
-    mockFetchMonthAssignments.mockResolvedValue([makeAssignment(400)]);
-    mockFetchCategoryCalcs.mockResolvedValue(new Map());
-    mockFetchReadyToAssign.mockResolvedValue(500);
-    mockBuildGroupedBudget.mockReturnValue(makeGroupedBudget());
+    mockGetBudgetForMonth.mockResolvedValue(makeGroupedBudget());
+    mockGetMonthAssignments.mockResolvedValue([makeAssignment(400)]);
+    mockGetActiveBudgetCategories.mockResolvedValue([]);
+    mockDbSyncMetaGet.mockResolvedValue({ readyToAssign: 500 });
     mockUpsertAssignment.mockResolvedValue(undefined);
     mockAppendLogEntry.mockResolvedValue(undefined);
+    mockDbAssignmentsPut.mockResolvedValue(undefined);
   });
 
   it('opens the assignment sheet when a category row is clicked', async () => {
@@ -151,7 +175,7 @@ describe('Plan screen — assign money', () => {
   });
 
   it('shows empty input when assigned is zero', async () => {
-    mockBuildGroupedBudget.mockReturnValue(makeGroupedBudget([makeCat({ assigned: 0, available: 0 })]));
+    mockGetBudgetForMonth.mockResolvedValue(makeGroupedBudget([makeCat({ assigned: 0, available: 0 })]));
 
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
@@ -256,10 +280,38 @@ describe('Plan screen — assign money', () => {
       expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
     });
   });
+
+  it('save updates IndexedDB directly so the UI updates without waiting for sync', async () => {
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const row = await screen.findByRole('button', { name: /Groceries/i });
+    fireEvent.click(row);
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '500' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(mockDbAssignmentsPut).toHaveBeenCalled());
+    const [written] = mockDbAssignmentsPut.mock.calls[0];
+    expect(written).toMatchObject({ category: 'Groceries', assigned: 500 });
+  });
 });
 
 describe('Plan screen — apply template', () => {
-  function makeCatWithTemplate(overrides: Partial<CategoryWithActivity> = {}): CategoryWithActivity {
+  function makeCatWithTemplate(overrides: Partial<BudgetCategory> = {}): BudgetCategory {
+    return {
+      category_group: 'Food',
+      category_subgroup: '',
+      category: 'Groceries',
+      category_type: 'fluid',
+      monthly_template_amount: 500,
+      sort_order: 1,
+      active: true,
+      _rowIndex: 7,
+      ...overrides,
+    };
+  }
+
+  function makeCatWithActivityAndTemplate(overrides: Partial<CategoryWithActivity> = {}): CategoryWithActivity {
     return {
       category_group: 'Food',
       category_subgroup: '',
@@ -278,24 +330,23 @@ describe('Plan screen — apply template', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFetchBudgetCategories.mockResolvedValue([]);
-    mockFetchMonthAssignments.mockResolvedValue([]);
-    mockFetchCategoryCalcs.mockResolvedValue(new Map());
-    mockFetchReadyToAssign.mockResolvedValue(0);
-    mockBuildGroupedBudget.mockReturnValue(makeGroupedBudget([makeCatWithTemplate()]));
+    mockGetBudgetForMonth.mockResolvedValue(makeGroupedBudget([makeCatWithActivityAndTemplate()]));
+    mockGetMonthAssignments.mockResolvedValue([]);
+    mockGetActiveBudgetCategories.mockResolvedValue([makeCatWithTemplate()]);
+    mockDbSyncMetaGet.mockResolvedValue({ readyToAssign: 0 });
     mockApplyTemplate.mockResolvedValue(undefined);
+    mockRefreshMonthBudget.mockResolvedValue(undefined);
     vi.spyOn(window, 'confirm').mockReturnValue(true);
   });
 
   it('renders the Apply Template button', async () => {
-    mockFetchBudgetCategories.mockResolvedValue([makeCatWithTemplate()]);
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
     expect(await screen.findByRole('button', { name: /Apply Template/i })).toBeInTheDocument();
   });
 
   it('button is disabled when no categories have a template amount', async () => {
-    mockFetchBudgetCategories.mockResolvedValue([makeCatWithTemplate({ monthly_template_amount: 0 })]);
+    mockGetActiveBudgetCategories.mockResolvedValue([makeCatWithTemplate({ monthly_template_amount: 0 })]);
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
     const btn = await screen.findByRole('button', { name: /Apply Template/i });
@@ -305,8 +356,8 @@ describe('Plan screen — apply template', () => {
   it('calls applyTemplate with client, month, categories, and assignments', async () => {
     const cats = [makeCatWithTemplate({ monthly_template_amount: 500 })];
     const existing = [makeAssignment(200)];
-    mockFetchBudgetCategories.mockResolvedValue(cats);
-    mockFetchMonthAssignments.mockResolvedValue(existing);
+    mockGetActiveBudgetCategories.mockResolvedValue(cats);
+    mockGetMonthAssignments.mockResolvedValue(existing);
 
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
@@ -326,8 +377,7 @@ describe('Plan screen — apply template', () => {
 
   it('shows confirm dialog when assignments already exist, and cancels if rejected', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false);
-    mockFetchBudgetCategories.mockResolvedValue([makeCatWithTemplate({ monthly_template_amount: 500 })]);
-    mockFetchMonthAssignments.mockResolvedValue([makeAssignment(200)]);
+    mockGetMonthAssignments.mockResolvedValue([makeAssignment(200)]);
 
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
@@ -340,21 +390,15 @@ describe('Plan screen — apply template', () => {
     expect(mockApplyTemplate).not.toHaveBeenCalled();
   });
 
-  it('reloads data after applying', async () => {
-    mockFetchBudgetCategories.mockResolvedValue([makeCatWithTemplate({ monthly_template_amount: 500 })]);
-    mockFetchMonthAssignments.mockResolvedValue([]);
-
+  it('calls refreshMonthBudget after applying', async () => {
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
 
     const btn = await screen.findByRole('button', { name: /Apply Template/i });
     await waitFor(() => expect(btn).not.toBeDisabled());
-    const callsBefore = mockFetchBudgetCategories.mock.calls.length;
     fireEvent.click(btn);
 
-    await waitFor(() =>
-      expect(mockFetchBudgetCategories.mock.calls.length).toBeGreaterThan(callsBefore)
-    );
+    await waitFor(() => expect(mockRefreshMonthBudget).toHaveBeenCalled());
   });
 });
 
@@ -391,15 +435,13 @@ describe('Plan screen — move money', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFetchBudgetCategories.mockResolvedValue([]);
-    mockFetchMonthAssignments.mockResolvedValue([makeAssignment(400)]);
-    mockFetchCategoryCalcs.mockResolvedValue(new Map());
-    mockFetchReadyToAssign.mockResolvedValue(500);
-    mockBuildGroupedBudget.mockReturnValue(makeGroupedBudgetTwo(destCat, sourceCat));
-    mockUpsertAssignment.mockResolvedValue(undefined);
-    mockAppendLogEntry.mockResolvedValue(undefined);
+    mockGetBudgetForMonth.mockResolvedValue(makeGroupedBudgetTwo(destCat, sourceCat));
+    mockGetMonthAssignments.mockResolvedValue([makeAssignment(400)]);
+    mockGetActiveBudgetCategories.mockResolvedValue([]);
+    mockDbSyncMetaGet.mockResolvedValue({ readyToAssign: 500 });
     mockBatchUpsertAssignments.mockResolvedValue(undefined);
     mockBatchAppendLogEntries.mockResolvedValue(undefined);
+    mockDbAssignmentsBulkPut.mockResolvedValue(undefined);
   });
 
   it('shows Move Money button in assignment sheet', async () => {
@@ -440,7 +482,7 @@ describe('Plan screen — move money', () => {
   it('fluid categories appear first in the picker', async () => {
     const fixedCat = makeSourceCat({ category: 'Rent', category_type: 'fixed_bill', available: 9999 });
     const fluidCat = makeSourceCat({ category: 'Dining Out', category_type: 'fluid', available: 10 });
-    mockBuildGroupedBudget.mockReturnValue([{
+    mockGetBudgetForMonth.mockResolvedValue([{
       groupName: 'Mixed',
       subgroups: [{ subgroupName: '', categories: [destCat, fixedCat, fluidCat] }],
       totalAssigned: 0, totalActivity: 0, totalAvailable: 0,
@@ -475,7 +517,7 @@ describe('Plan screen — move money', () => {
 
   it('Cover shortage button appears when destination is overspent', async () => {
     const overspentDest = makeCat({ category: 'Groceries', assigned: 100, available: -50 });
-    mockBuildGroupedBudget.mockReturnValue(makeGroupedBudgetTwo(overspentDest, sourceCat));
+    mockGetBudgetForMonth.mockResolvedValue(makeGroupedBudgetTwo(overspentDest, sourceCat));
 
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
@@ -506,7 +548,7 @@ describe('Plan screen — move money', () => {
 
   it('Cover shortage pre-fills the exact deficit', async () => {
     const overspentDest = makeCat({ category: 'Groceries', assigned: 100, available: -75 });
-    mockBuildGroupedBudget.mockReturnValue(makeGroupedBudgetTwo(overspentDest, sourceCat));
+    mockGetBudgetForMonth.mockResolvedValue(makeGroupedBudgetTwo(overspentDest, sourceCat));
 
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
@@ -525,7 +567,7 @@ describe('Plan screen — move money', () => {
     const sourceAssignment: BudgetAssignment = {
       month: '2026-04', category: 'Dining Out', assigned: 200, source: 'manual', _rowIndex: 510,
     };
-    mockFetchMonthAssignments.mockResolvedValue([makeAssignment(400), sourceAssignment]);
+    mockGetMonthAssignments.mockResolvedValue([makeAssignment(400), sourceAssignment]);
 
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
@@ -564,6 +606,24 @@ describe('Plan screen — move money', () => {
     expect(entries.some((e: { change_type: string }) => e.change_type.startsWith('move_to:'))).toBe(true);
   });
 
+  it('confirm updates IndexedDB directly for both categories', async () => {
+    const { default: Plan } = await import('../../src/screens/Plan');
+    render(<Plan />);
+
+    const row = await screen.findByRole('button', { name: /Groceries/i });
+    fireEvent.click(row);
+    fireEvent.click(screen.getByRole('button', { name: /Move Money/i }));
+    fireEvent.click(document.querySelector('.picker-item') as HTMLElement);
+
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '20' } });
+    fireEvent.click(screen.getByRole('button', { name: /Confirm/i }));
+
+    await waitFor(() => expect(mockDbAssignmentsBulkPut).toHaveBeenCalled());
+    const [written] = mockDbAssignmentsBulkPut.mock.calls[0];
+    expect(written.some((e: { category: string }) => e.category === 'Dining Out')).toBe(true);
+    expect(written.some((e: { category: string }) => e.category === 'Groceries')).toBe(true);
+  });
+
   it('cancel in picker closes the move money flow', async () => {
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
@@ -576,7 +636,7 @@ describe('Plan screen — move money', () => {
     fireEvent.click(screen.getByRole('button', { name: /Cancel/i }));
 
     expect(screen.queryByText(/Pick a source category/i)).not.toBeInTheDocument();
-    expect(mockUpsertAssignment).not.toHaveBeenCalled();
+    expect(mockBatchUpsertAssignments).not.toHaveBeenCalled();
   });
 
   it('cancel in confirm step closes the move money flow without saving', async () => {
@@ -592,31 +652,13 @@ describe('Plan screen — move money', () => {
     fireEvent.click(screen.getByRole('button', { name: /Cancel/i }));
 
     expect(screen.queryByRole('button', { name: /Confirm/i })).not.toBeInTheDocument();
-    expect(mockUpsertAssignment).not.toHaveBeenCalled();
-  });
-
-  it('plan refreshes after a successful move', async () => {
-    const { default: Plan } = await import('../../src/screens/Plan');
-    render(<Plan />);
-
-    const row = await screen.findByRole('button', { name: /Groceries/i });
-    fireEvent.click(row);
-    fireEvent.click(screen.getByRole('button', { name: /Move Money/i }));
-    fireEvent.click(document.querySelector('.picker-item') as HTMLElement);
-
-    const callsBefore = mockFetchBudgetCategories.mock.calls.length;
-    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '20' } });
-    fireEvent.click(screen.getByRole('button', { name: /Confirm/i }));
-
-    await waitFor(() =>
-      expect(mockFetchBudgetCategories.mock.calls.length).toBeGreaterThan(callsBefore)
-    );
+    expect(mockBatchUpsertAssignments).not.toHaveBeenCalled();
   });
 
   it('picker only shows categories with available > 0', async () => {
     const zeroCat = makeSourceCat({ category: 'Haircuts', available: 0, assigned: 50 });
     const negCat = makeSourceCat({ category: 'Gas', available: -20, assigned: 30 });
-    mockBuildGroupedBudget.mockReturnValue([{
+    mockGetBudgetForMonth.mockResolvedValue([{
       groupName: 'Food',
       subgroups: [{ subgroupName: '', categories: [destCat, sourceCat, zeroCat, negCat] }],
       totalAssigned: 0, totalActivity: 0, totalAvailable: 0,
@@ -637,7 +679,7 @@ describe('Plan screen — move money', () => {
 
   it('picker shows empty state when no categories have available funds', async () => {
     const zeroCat = makeSourceCat({ category: 'Dining Out', available: 0 });
-    mockBuildGroupedBudget.mockReturnValue(makeGroupedBudgetTwo(destCat, zeroCat));
+    mockGetBudgetForMonth.mockResolvedValue(makeGroupedBudgetTwo(destCat, zeroCat));
 
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
@@ -652,7 +694,7 @@ describe('Plan screen — move money', () => {
 
   it('picker shows the correct available balance for each source category', async () => {
     const catWith150 = makeSourceCat({ category: 'Dining Out', available: 150 });
-    mockBuildGroupedBudget.mockReturnValue(makeGroupedBudgetTwo(destCat, catWith150));
+    mockGetBudgetForMonth.mockResolvedValue(makeGroupedBudgetTwo(destCat, catWith150));
 
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
@@ -667,7 +709,7 @@ describe('Plan screen — move money', () => {
 
   it('confirm shows error and blocks save when amount exceeds source available', async () => {
     const limitedSource = makeSourceCat({ category: 'Dining Out', available: 50, assigned: 200 });
-    mockBuildGroupedBudget.mockReturnValue(makeGroupedBudgetTwo(destCat, limitedSource));
+    mockGetBudgetForMonth.mockResolvedValue(makeGroupedBudgetTwo(destCat, limitedSource));
 
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);

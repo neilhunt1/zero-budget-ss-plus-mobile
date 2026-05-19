@@ -1,15 +1,19 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuth } from '../hooks/useAuth';
-import { useSheetSync } from '../hooks/useSheetSync';
 import { SheetsClient } from '../api/client';
 import {
-  fetchTransactions,
-  updateTransactionFields,
   classifyTransactionType,
   findTransferPair,
 } from '../api/transactions';
-import { fetchBudgetCategories } from '../api/budget';
+import { getActiveBudgetCategories } from '../db/queries';
+import {
+  optimisticApproveIncome,
+  optimisticConfirmTransfer,
+  optimisticAssignPurchase,
+} from '../db/optimisticWrites';
+import { db } from '../db/schema';
 import { Transaction, BudgetCategory, TransactionType } from '../types';
 
 const SHEET_ID = import.meta.env.VITE_GOOGLE_SHEET_ID as string;
@@ -37,14 +41,12 @@ function IncomeCard({
   onTypeOverride,
   escapeOpen,
   onToggleEscape,
-  saving,
 }: {
   tx: Transaction;
   onApprove: () => void;
   onTypeOverride: (type: TransactionType) => void;
   escapeOpen: boolean;
   onToggleEscape: () => void;
-  saving: boolean;
 }) {
   return (
     <div className="triage-card triage-card--income">
@@ -56,8 +58,8 @@ function IncomeCard({
         <span>{tx.date}</span>
       </div>
       <div className="triage-actions">
-        <button className="btn btn-primary" onClick={onApprove} disabled={saving}>
-          {saving ? 'Saving…' : 'Approve'}
+        <button className="btn btn-primary" onClick={onApprove}>
+          Approve
         </button>
       </div>
       <button className="triage-escape-hatch" onClick={onToggleEscape}>
@@ -80,7 +82,6 @@ function TransferCard({
   onTypeOverride,
   escapeOpen,
   onToggleEscape,
-  saving,
 }: {
   tx: Transaction;
   pair: Transaction | null;
@@ -88,7 +89,6 @@ function TransferCard({
   onTypeOverride: (type: TransactionType) => void;
   escapeOpen: boolean;
   onToggleEscape: () => void;
-  saving: boolean;
 }) {
   return (
     <div className="triage-card triage-card--transfer">
@@ -103,8 +103,8 @@ function TransferCard({
         <div className="triage-pair-match">Matched with {pair.account}</div>
       )}
       <div className="triage-actions">
-        <button className="btn btn-primary" onClick={onConfirm} disabled={saving}>
-          {saving ? 'Saving…' : 'Confirm'}
+        <button className="btn btn-primary" onClick={onConfirm}>
+          Confirm
         </button>
       </div>
       <button className="triage-escape-hatch" onClick={onToggleEscape}>
@@ -129,7 +129,6 @@ function PurchaseCard({
   onTypeOverride,
   escapeOpen,
   onToggleEscape,
-  saving,
 }: {
   tx: Transaction;
   categories: BudgetCategory[];
@@ -139,11 +138,9 @@ function PurchaseCard({
   onTypeOverride: (type: TransactionType) => void;
   escapeOpen: boolean;
   onToggleEscape: () => void;
-  saving: boolean;
 }) {
   const RTA_VALUE = '__rta__';
 
-  // Build picker: suggested first (if present), then all others
   const suggested = tx.suggested_category;
   const others = categories.filter((c) => c.category !== suggested);
 
@@ -157,7 +154,6 @@ function PurchaseCard({
       </div>
 
       <div className="triage-category-list">
-        {/* Ready to Assign option */}
         <button
           className={`triage-category-item triage-category-item--rta${selectedCategory === RTA_VALUE ? ' selected' : ''}`}
           onClick={() => onSelectCategory(RTA_VALUE)}
@@ -165,7 +161,6 @@ function PurchaseCard({
           <em>Ready to Assign</em>
         </button>
 
-        {/* Suggested category */}
         {suggested && (
           <button
             className={`triage-category-item triage-category-item--suggested${selectedCategory === suggested ? ' selected' : ''}`}
@@ -175,7 +170,6 @@ function PurchaseCard({
           </button>
         )}
 
-        {/* All other active categories */}
         {others.map((c) => (
           <button
             key={c.category}
@@ -191,9 +185,9 @@ function PurchaseCard({
         <button
           className="btn btn-primary"
           onClick={onAssign}
-          disabled={saving || !selectedCategory}
+          disabled={!selectedCategory}
         >
-          {saving ? 'Saving…' : 'Assign'}
+          Assign
         </button>
       </div>
 
@@ -228,60 +222,59 @@ function TypeSelectCard({ onSelect }: { onSelect: (type: TransactionType) => voi
 export default function Triage() {
   const { token } = useAuth();
   const navigate = useNavigate();
-  const revision = useSheetSync(token);
 
-  const [triageQueue, setTriageQueue] = useState<Transaction[]>([]);
-  const [allTxns, setAllTxns] = useState<Transaction[]>([]);
-  const [categories, setCategories] = useState<BudgetCategory[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const rawAllTxns = useLiveQuery(() => db.transactions.toArray(), []);
+  const rawCategories = useLiveQuery(() => getActiveBudgetCategories(), []);
+
+  const allTxns = rawAllTxns ?? [];
+  const categories = rawCategories ?? [];
+
+  // Unreviewed, non-split-child transactions, oldest-first
+  const triageQueue = useMemo(
+    () =>
+      allTxns
+        .filter((t) => !t.parent_id && !t.reviewed)
+        .sort((a, b) => a.date.localeCompare(b.date)),
+    [allTxns]
+  );
 
   const [index, setIndex] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [overrideType, setOverrideType] = useState<TransactionType | null>(null);
   const [escapeOpen, setEscapeOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!token) return;
-    const client = new SheetsClient(SHEET_ID, token);
-    setLoading(true);
-    setError(null);
-    try {
-      const [allFetched, cats] = await Promise.all([
-        fetchTransactions(client, { includeSplitChildren: true }),
-        fetchBudgetCategories(client),
-      ]);
-      setAllTxns(allFetched);
-      setTriageQueue(allFetched.filter((t) => !t.reviewed));
-      setCategories(cats);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [token, revision]);
+  const tx = triageQueue[index];
 
-  useEffect(() => { load(); }, [load]);
-
-  // Sync card state whenever we navigate to a different card.
-  // Pre-selects an existing category so already-categorized transactions show it highlighted.
+  // Reset card state when navigating to a different transaction
   useEffect(() => {
-    const tx = triageQueue[index];
     if (!tx) return;
     setSelectedCategory(tx.category ?? '');
     setOverrideType(null);
     setEscapeOpen(false);
-  }, [index, triageQueue]);
+  }, [tx?.transaction_id, index]);
 
   const advance = () => setIndex((i) => i + 1);
   const goBack = () => setIndex((i) => Math.max(0, i - 1));
 
-  if (loading) return <div className="screen triage-screen"><div className="state-msg">Loading…</div></div>;
-  if (error) return <div className="screen triage-screen"><div className="state-msg error">{error}</div></div>;
+  if (rawAllTxns === undefined || rawCategories === undefined) {
+    return <div className="screen triage-screen"><div className="state-msg">Loading…</div></div>;
+  }
+
+  if (error) {
+    return (
+      <div className="screen triage-screen">
+        <div className="state-msg error">
+          {error}
+          <button className="btn btn-secondary" style={{ marginTop: '1rem' }} onClick={() => setError(null)}>
+            Dismiss
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const total = triageQueue.length;
-  const remaining = total - index;
 
   if (index >= total) {
     return (
@@ -297,7 +290,6 @@ export default function Triage() {
     );
   }
 
-  const tx = triageQueue[index];
   const effectiveType = overrideType ?? classifyTransactionType(tx);
   const pair = (effectiveType === 'transfer' && overrideType === 'transfer')
     ? findTransferPair(tx, allTxns)
@@ -307,68 +299,31 @@ export default function Triage() {
 
   const handleApproveIncome = async () => {
     if (!token) return;
-    setSaving(true);
     try {
-      const client = new SheetsClient(SHEET_ID, token);
-      await updateTransactionFields(client, tx._rowIndex, {
-        reviewed: true,
-        transaction_type: 'income',
-        category: '',
-        category_group: '',
-        category_type: '',
-      });
-      advance();
+      await optimisticApproveIncome(tx, new SheetsClient(SHEET_ID, token));
     } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSaving(false);
+      setError('Failed to save — change reverted');
     }
   };
 
   const handleConfirmTransfer = async () => {
     if (!token) return;
-    setSaving(true);
     try {
-      const client = new SheetsClient(SHEET_ID, token);
-      await updateTransactionFields(client, tx._rowIndex, {
-        reviewed: true,
-        transaction_type: 'transfer',
-        ...(pair ? { transfer_pair_id: pair.transaction_id } : {}),
-      });
-      if (pair && !pair.transfer_pair_id) {
-        await updateTransactionFields(client, pair._rowIndex, {
-          transfer_pair_id: tx.transaction_id,
-        });
-      }
-      advance();
+      await optimisticConfirmTransfer(tx, pair, new SheetsClient(SHEET_ID, token));
     } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSaving(false);
+      setError('Failed to save — change reverted');
     }
   };
 
   const handleAssignPurchase = async () => {
     if (!token || !selectedCategory) return;
-    setSaving(true);
     const RTA_VALUE = '__rta__';
-    const isRta = selectedCategory === RTA_VALUE;
-    const chosenCat = isRta ? '' : selectedCategory;
+    const chosenCat = selectedCategory === RTA_VALUE ? '' : selectedCategory;
     const catRecord = categories.find((c) => c.category === chosenCat);
     try {
-      const client = new SheetsClient(SHEET_ID, token);
-      await updateTransactionFields(client, tx._rowIndex, {
-        reviewed: true,
-        transaction_type: 'regular',
-        category: chosenCat,
-        category_group: catRecord?.category_group ?? '',
-        category_type: catRecord?.category_type ?? '',
-      });
-      advance();
+      await optimisticAssignPurchase(tx, chosenCat, catRecord, new SheetsClient(SHEET_ID, token));
     } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSaving(false);
+      setError('Failed to save — change reverted');
     }
   };
 
@@ -400,7 +355,6 @@ export default function Triage() {
             onTypeOverride={handleTypeOverride}
             escapeOpen={escapeOpen}
             onToggleEscape={() => setEscapeOpen((o) => !o)}
-            saving={saving}
           />
         )}
         {effectiveType === 'transfer' && (
@@ -411,7 +365,6 @@ export default function Triage() {
             onTypeOverride={handleTypeOverride}
             escapeOpen={escapeOpen}
             onToggleEscape={() => setEscapeOpen((o) => !o)}
-            saving={saving}
           />
         )}
         {effectiveType === 'regular' && (
@@ -424,16 +377,15 @@ export default function Triage() {
             onTypeOverride={handleTypeOverride}
             escapeOpen={escapeOpen}
             onToggleEscape={() => setEscapeOpen((o) => !o)}
-            saving={saving}
           />
         )}
       </div>
 
       <div className="triage-skip-row">
-        <button className="btn btn-ghost" onClick={goBack} disabled={saving || index === 0}>
+        <button className="btn btn-ghost" onClick={goBack} disabled={index === 0}>
           ‹ Back
         </button>
-        <button className="btn btn-ghost" onClick={advance} disabled={saving}>
+        <button className="btn btn-ghost" onClick={advance} disabled={index >= total - 1}>
           Skip ›
         </button>
       </div>

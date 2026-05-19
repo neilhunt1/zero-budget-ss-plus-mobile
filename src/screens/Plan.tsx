@@ -1,20 +1,18 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuth } from '../hooks/useAuth';
-import { useSheetSync } from '../hooks/useSheetSync';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { SheetsClient } from '../api/client';
 import {
-  fetchBudgetCategories,
-  fetchMonthAssignments,
-  fetchCategoryCalcs,
-  buildGroupedBudget,
-  fetchReadyToAssign,
   upsertAssignment,
   appendLogEntry,
   applyTemplate,
   batchUpsertAssignments,
   batchAppendLogEntries,
 } from '../api/budget';
+import { db } from '../db/schema';
+import { getBudgetForMonth, getMonthAssignments, getActiveBudgetCategories } from '../db/queries';
+import { refreshMonthBudget } from '../db/sync';
 import { GroupedBudget, BudgetAssignment, BudgetCategory, CategoryWithActivity } from '../types';
 
 const SHEET_ID = import.meta.env.VITE_GOOGLE_SHEET_ID as string;
@@ -53,58 +51,34 @@ interface MoveMoneyState {
 
 export default function Plan() {
   const { token } = useAuth();
-  const revision = useSheetSync(token);
   const [month, setMonth] = useState(() => toYYYYMM(new Date()));
-  const [groups, setGroups] = useState<GroupedBudget[]>([]);
-  const [assignments, setAssignments] = useState<BudgetAssignment[]>([]);
-  const [readyToAssign, setReadyToAssign] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [editState, setEditState] = useState<EditState | null>(null);
   const [moveMoneyState, setMoveMoneyState] = useState<MoveMoneyState | null>(null);
-  const [categories, setCategories] = useState<BudgetCategory[]>([]);
   const [applyingTemplate, setApplyingTemplate] = useState(false);
+  const [writeError, setWriteError] = useState<string | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const isDesktop = useMediaQuery('(min-width: 768px)');
 
-  const load = useCallback(async () => {
-    if (!token) return;
-    const client = new SheetsClient(SHEET_ID, token);
-    setLoading(true);
-    setError(null);
+  const groups = useLiveQuery(() => getBudgetForMonth(month), [month]) as GroupedBudget[] | undefined;
+  const assignments = useLiveQuery(() => getMonthAssignments(month), [month]) as BudgetAssignment[] | undefined;
+  const categories = useLiveQuery(() => getActiveBudgetCategories()) as BudgetCategory[] | undefined;
+  const syncMeta = useLiveQuery(() => db.syncMeta.get('all'));
 
-    try {
-      const [cats, rawAssignments, calcs] = await Promise.all([
-        fetchBudgetCategories(client),
-        fetchMonthAssignments(client, month),
-        fetchCategoryCalcs(client, month),
-      ]);
-      setCategories(cats);
-      setAssignments(rawAssignments);
-      setGroups(buildGroupedBudget(cats, rawAssignments, calcs));
-      setReadyToAssign(await fetchReadyToAssign(client));
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [token, month, revision]); // revision triggers re-fetch when sheet changes
-
-  useEffect(() => { load(); }, [load]);
+  const loading = groups === undefined;
+  const readyToAssign = syncMeta?.readyToAssign ?? 0;
 
   // Auto-select first group on desktop when data loads
-  useEffect(() => {
-    if (isDesktop && groups.length > 0 && !selectedGroup) {
-      setSelectedGroup(groups[0].groupName);
-    }
-  }, [isDesktop, groups, selectedGroup]);
+  const firstGroupName = groups?.[0]?.groupName;
+  if (isDesktop && firstGroupName && !selectedGroup) {
+    setSelectedGroup(firstGroupName);
+  }
 
-  const totalAssigned = groups.reduce((s, g) => s + g.totalAssigned, 0);
-  const totalActivity = groups.reduce((s, g) => s + g.totalActivity, 0);
-  const totalAvailable = groups.reduce((s, g) => s + g.totalAvailable, 0);
+  const totalAssigned = (groups ?? []).reduce((s, g) => s + g.totalAssigned, 0);
+  const totalActivity = (groups ?? []).reduce((s, g) => s + g.totalActivity, 0);
+  const totalAvailable = (groups ?? []).reduce((s, g) => s + g.totalAvailable, 0);
 
   const handleRowClick = (cat: CategoryWithActivity) => {
-    const existing = assignments.find((a) => a.category === cat.category);
+    const existing = (assignments ?? []).find((a) => a.category === cat.category);
     setEditState({
       cat,
       existing,
@@ -117,24 +91,25 @@ export default function Plan() {
   const handleCancel = () => setEditState(null);
 
   const handleApplyTemplate = async () => {
-    if (!token) return;
+    if (!token || !categories) return;
     if (categories.every((c) => c.monthly_template_amount === 0)) return;
 
-    if (assignments.length > 0) {
+    if ((assignments ?? []).length > 0) {
       const ok = window.confirm('This will overwrite existing assignments. Continue?');
       if (!ok) return;
     }
 
     setApplyingTemplate(true);
+    setWriteError(null);
     try {
       const client = new SheetsClient(SHEET_ID, token);
-      await applyTemplate(client, month, categories, assignments);
+      await applyTemplate(client, month, categories, assignments ?? []);
       // Brief pause: lets Google Sheets finish recalculating SUMIFS formulas
       // in Budget_Calcs before we read them back.
       await new Promise((r) => setTimeout(r, 800));
-      await load();
+      await refreshMonthBudget(token, SHEET_ID);
     } catch (e) {
-      setError((e as Error).message);
+      setWriteError((e as Error).message);
     } finally {
       setApplyingTemplate(false);
     }
@@ -151,7 +126,14 @@ export default function Plan() {
       const delta = amount - (existing?.assigned ?? 0);
       await appendLogEntry(client, month, cat.category, delta, 'manual');
       setEditState(null);
-      await load();
+      // Update IndexedDB directly so useLiveQuery re-renders without waiting for next poll
+      await db.budgetAssignments.put({
+        month,
+        category: cat.category,
+        assigned: amount,
+        source: 'manual',
+        _rowIndex: existing?._rowIndex ?? 0,
+      });
     } catch (e) {
       setEditState((prev) =>
         prev ? { ...prev, saving: false, saveError: (e as Error).message } : null
@@ -178,7 +160,7 @@ export default function Plan() {
     if (!moveMoneyState) return;
     const { destCat } = moveMoneyState;
     const deficit = destCat.available < 0 ? -destCat.available : 0;
-    const sourceExisting = assignments.find((a) => a.category === sourceCat.category);
+    const sourceExisting = (assignments ?? []).find((a) => a.category === sourceCat.category);
     setMoveMoneyState((prev) =>
       prev
         ? {
@@ -221,7 +203,23 @@ export default function Plan() {
         { month, category: destCat.category, amount, change_type: `move_to:${sourceCat.category}` },
       ]);
       setMoveMoneyState(null);
-      await load();
+      // Update both assignments in IndexedDB so useLiveQuery re-renders immediately
+      await db.budgetAssignments.bulkPut([
+        {
+          month,
+          category: sourceCat.category,
+          assigned: sourceCat.assigned - amount,
+          source: 'manual',
+          _rowIndex: sourceExisting?._rowIndex ?? 0,
+        },
+        {
+          month,
+          category: destCat.category,
+          assigned: destCat.assigned + amount,
+          source: 'manual',
+          _rowIndex: destExisting?._rowIndex ?? 0,
+        },
+      ]);
     } catch (e) {
       setMoveMoneyState((prev) =>
         prev ? { ...prev, saving: false, saveError: (e as Error).message } : null
@@ -229,7 +227,7 @@ export default function Plan() {
     }
   };
 
-  const allCatsFlat = groups.flatMap((g) => g.subgroups.flatMap((s) => s.categories));
+  const allCatsFlat = (groups ?? []).flatMap((g) => g.subgroups.flatMap((s) => s.categories));
   const pickerCats = moveMoneyState
     ? [...allCatsFlat]
         .filter((c) => c.category !== moveMoneyState.destCat.category && c.available > 0)
@@ -255,7 +253,7 @@ export default function Plan() {
           type="button"
           className="btn-secondary apply-template-btn"
           onClick={handleApplyTemplate}
-          disabled={applyingTemplate || loading || categories.every((c) => c.monthly_template_amount === 0)}
+          disabled={applyingTemplate || loading || (categories ?? []).every((c) => c.monthly_template_amount === 0)}
         >
           {applyingTemplate ? 'Applying…' : 'Apply Template'}
         </button>
@@ -269,9 +267,9 @@ export default function Plan() {
       </div>
 
       {loading && <div className="state-msg">Loading…</div>}
-      {error && <div className="state-msg error">{error}</div>}
+      {writeError && <div className="state-msg error">{writeError}</div>}
 
-      {!loading && !error && (
+      {!loading && (
         <>
           {/* Summary totals */}
           <div className="budget-summary">
@@ -294,7 +292,7 @@ export default function Plan() {
           <div className={isDesktop ? 'plan-desktop-body' : undefined}>
             {isDesktop && (
               <div className="plan-group-sidebar">
-                {groups.map((g) => (
+                {(groups ?? []).map((g) => (
                   <button
                     key={g.groupName}
                     type="button"
@@ -320,7 +318,7 @@ export default function Plan() {
               </div>
 
               {/* Groups: all on mobile, selected group on desktop */}
-              {(isDesktop ? groups.filter((g) => g.groupName === selectedGroup) : groups).map((group) => (
+              {(isDesktop ? (groups ?? []).filter((g) => g.groupName === selectedGroup) : (groups ?? [])).map((group) => (
                 <div key={group.groupName} className="budget-group">
                   {!isDesktop && (
                     <div className="group-header">
@@ -329,12 +327,12 @@ export default function Plan() {
                     </div>
                   )}
 
-                  {group.subgroups.map(({ subgroupName, categories }) => (
+                  {group.subgroups.map(({ subgroupName, categories: cats }) => (
                     <div key={subgroupName || '__root__'} className="budget-subgroup">
                       {subgroupName && (
                         <div className="subgroup-header">{subgroupName}</div>
                       )}
-                      {categories.map((cat) => (
+                      {cats.map((cat) => (
                         <button
                           key={cat.category}
                           type="button"
@@ -354,7 +352,7 @@ export default function Plan() {
                 </div>
               ))}
 
-              {groups.length === 0 && (
+              {(groups ?? []).length === 0 && (
                 <div className="state-msg">No categories found. Run <code>npm run setup:dev</code> first.</div>
               )}
             </div>

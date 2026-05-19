@@ -11,3 +11,6 @@ service-account-*.json
 *-service-account.json
 *.key.json
 .claude/worktrees/
+
+# Local data files (YNAB exports, etc.) — never commit
+data/

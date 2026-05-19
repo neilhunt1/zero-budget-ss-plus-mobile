@@ -1,11 +1,11 @@
 /**
- * sync-from-ynab.ts
+ * sync-from-ynab.ts  (npm run import:ynab:plan:dev/prod)
  *
  * Re-runnable script that syncs ALL historical budget state from YNAB into the sheet.
  * Safe to run multiple times — fully idempotent.
  *
  * What it does:
- *   1. Reads YNAB Plan CSV from YNAB_Plan_Import tab (user pastes CSV there)
+ *   1. Reads YNAB Plan CSV (local file or YNAB_Plan_Import sheet tab as fallback)
  *   2. Wipes all source:ynab_import Budget assignment rows
  *   3. Re-imports ALL months from the YNAB Plan CSV tagged source:ynab_import
  *   4. Reads latest balance per account from Balance History (BTS) tab
@@ -14,8 +14,13 @@
  *   7. Writes LastYnabSync timestamp to Budget!B2
  *
  * Usage:
- *   npm run sync-from-ynab:dev
- *   npm run sync-from-ynab:prod
+ *   npm run import:ynab:plan:dev
+ *   npm run import:ynab:plan:dev -- --file ~/Downloads/plan.csv
+ *   npm run import:ynab:plan:prod
+ *
+ * Defaults:
+ *   --file   data/ynab/plan.csv  (relative to project root)
+ *            Falls back to the YNAB_Plan_Import sheet tab if the file does not exist.
  *
  * Idempotency contract:
  *   - Only rows tagged source:ynab_import in Budget assignments are wiped/re-created
@@ -26,6 +31,42 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import { google, sheets_v4 } from 'googleapis';
+
+// ─── CSV parsing ──────────────────────────────────────────────────────────────
+
+/** Parse a single CSV line, handling double-quoted fields and escaped quotes. */
+function parseCsvRow(line: string): string[] {
+  const fields: string[] = [];
+  let i = 0;
+  while (i <= line.length) {
+    if (line[i] === '"') {
+      let field = '';
+      i++; // skip opening quote
+      while (i < line.length) {
+        if (line[i] === '"' && line[i + 1] === '"') { field += '"'; i += 2; }
+        else if (line[i] === '"') { i++; break; }
+        else { field += line[i++]; }
+      }
+      fields.push(field);
+      if (line[i] === ',') i++;
+    } else {
+      const end = line.indexOf(',', i);
+      if (end === -1) { fields.push(line.slice(i)); break; }
+      fields.push(line.slice(i, end));
+      i = end + 1;
+    }
+    if (i > line.length) break;
+  }
+  return fields;
+}
+
+/** Parse CSV file content into a 2D string array (same shape as Sheets API values.get). */
+function parseCsvFile(content: string): string[][] {
+  return content
+    .split(/\r?\n/)
+    .filter((line) => line.trim().length > 0)
+    .map(parseCsvRow);
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -272,20 +313,37 @@ function loadEnv(): { sheetId: string; authConfig: AuthConfig } {
 
 // ─── Sheet operations ─────────────────────────────────────────────────────────
 
-/** Read and parse YNAB Plan rows from the YNAB_Plan_Import tab. */
+/**
+ * Read and parse YNAB Plan rows.
+ * If filePath is given, reads the local CSV file directly.
+ * Otherwise falls back to the YNAB_Plan_Import sheet tab.
+ */
 async function readYnabPlan(
   sheets: sheets_v4.Sheets,
   sheetId: string,
-  categoryIndex: Map<string, FlatCategory>
+  categoryIndex: Map<string, FlatCategory>,
+  filePath: string | null
 ): Promise<YnabPlanRow[]> {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: 'YNAB_Plan_Import!A1:G',
-  });
-  const rows = res.data.values ?? [];
-  if (rows.length === 0) {
-    log('YNAB_Plan_Import: tab is empty — paste a YNAB Plan CSV export there first');
-    return [];
+  let rows: string[][];
+
+  if (filePath) {
+    const content = fs.readFileSync(filePath, 'utf8')
+      .replace(/^﻿/, ''); // strip UTF-8 BOM
+    rows = parseCsvFile(content);
+    if (rows.length === 0) {
+      log(`plan.csv: file is empty — ${filePath}`);
+      return [];
+    }
+  } else {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: 'YNAB_Plan_Import!A1:G',
+    });
+    rows = res.data.values ?? [];
+    if (rows.length === 0) {
+      log('YNAB_Plan_Import: tab is empty — put plan.csv in data/ynab/ or paste a YNAB Plan CSV export into the tab');
+      return [];
+    }
   }
 
   // Detect columns from header row (case-insensitive, matches YNAB Plan CSV headers exactly)
@@ -368,11 +426,17 @@ async function readAccountBalances(
 
   const headers = rows[0].map((h: string) => h.toLowerCase().trim());
   const accountCol = headers.findIndex((h) => /account/i.test(h));
-  const balanceCol = headers.findIndex((h) => /balance/i.test(h));
+  // BankToSheets uses "current" for the running account balance.
+  // Fall back to any column containing "balance" for other schema variants.
+  const balanceCol =
+    headers.findIndex((h) => h === 'current') >= 0
+      ? headers.findIndex((h) => h === 'current')
+      : headers.findIndex((h) => /balance/i.test(h));
 
   if (accountCol === -1 || balanceCol === -1) {
     log(
       `Balance History (BTS): could not find account/balance columns.\n` +
+      `  Expected: "account" and "current" (or "balance").\n` +
       `  Headers found: ${headers.join(', ')}`
     );
     return [];
@@ -515,11 +579,32 @@ function bail(msg: string): never {
   process.exit(1);
 }
 
+function parseArgs(): { planFilePath: string | null } {
+  const args = process.argv.slice(2);
+  const get = (flag: string) => {
+    const idx = args.findIndex((a) => a === flag || a.startsWith(`${flag}=`));
+    if (idx === -1) return null;
+    if (args[idx].includes('=')) return args[idx].split('=').slice(1).join('=');
+    return args[idx + 1] ?? null;
+  };
+
+  const rawFile = get('--file') ?? 'data/ynab/plan.csv';
+  const resolved = path.resolve(process.cwd(), rawFile.replace(/^~/, process.env.HOME ?? '~'));
+
+  // If explicitly passed and missing, that's an error. If using the default, silently fall back.
+  if (get('--file') !== null && !fs.existsSync(resolved)) {
+    bail(`File not found: ${resolved}`);
+  }
+
+  return { planFilePath: fs.existsSync(resolved) ? resolved : null };
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   console.log('\n── Zero Budget: Sync from YNAB ─────────────────────────────\n');
 
+  const { planFilePath } = parseArgs();
   const { sheetId, authConfig } = loadEnv();
 
   const auth = new google.auth.GoogleAuth({
@@ -541,8 +626,10 @@ async function main(): Promise<void> {
   const categoryIndex = buildCategoryIndex(flatCategories);
   log(`Categories: indexed ${categoryIndex.size} entries`);
 
-  // Step 1: read YNAB Plan from sheet
-  const ynabRows = await readYnabPlan(sheets, sheetId, categoryIndex);
+  // Step 1: read YNAB Plan (local file if available, sheet tab as fallback)
+  if (planFilePath) log(`Plan CSV: reading from ${planFilePath}`);
+  else log('Plan CSV: no local file found — reading from YNAB_Plan_Import sheet tab');
+  const ynabRows = await readYnabPlan(sheets, sheetId, categoryIndex, planFilePath);
 
   // Step 2: read account balances
   const accountBalances = await readAccountBalances(sheets, sheetId);
