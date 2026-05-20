@@ -5,9 +5,8 @@ import type { Transaction } from '../../src/types';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-const mockNavigate = vi.fn();
 vi.mock('react-router-dom', () => ({
-  useNavigate: () => mockNavigate,
+  useNavigate: () => vi.fn(),
 }));
 
 vi.mock('dexie-react-hooks', async () => {
@@ -22,11 +21,9 @@ vi.mock('dexie-react-hooks', async () => {
   };
 });
 
-const mockToArray = vi.fn();
-vi.mock('../../src/db/schema', () => ({
-  db: {
-    transactions: { toArray: () => mockToArray() },
-  },
+const mockGetTransactionsByMonth = vi.fn();
+vi.mock('../../src/db/queries', () => ({
+  getTransactionsByMonth: (...args: unknown[]) => mockGetTransactionsByMonth(...args),
 }));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -40,7 +37,7 @@ function makeTx(overrides: Partial<Transaction> & { transaction_id: string }): T
     external_id: '',
     imported_at: '',
     status: 'cleared',
-    date: '2026-04-01',
+    date: '2026-05-01',
     payee: 'Test Payee',
     description: '',
     category: 'Groceries 🛒',
@@ -64,99 +61,53 @@ function makeTx(overrides: Partial<Transaction> & { transaction_id: string }): T
   };
 }
 
-// ─── Unit tests for exported helpers ─────────────────────────────────────────
+// ─── Unit tests for txRowClass ────────────────────────────────────────────────
 
-describe('buildAccountSummaries', () => {
-  it('aggregates balance and txCount per account', async () => {
-    const { buildAccountSummaries } = await import('../../src/screens/Accounts');
-    const txns = [
-      makeTx({ transaction_id: 'a1', account: 'Checking', outflow: 50, inflow: 0 }),
-      makeTx({ transaction_id: 'a2', account: 'Checking', outflow: 0, inflow: 200 }),
-      makeTx({ transaction_id: 'a3', account: 'Savings', outflow: 0, inflow: 1000 }),
-    ];
-    const summaries = buildAccountSummaries(txns);
-    const checking = summaries.find((s) => s.name === 'Checking')!;
-    const savings = summaries.find((s) => s.name === 'Savings')!;
-
-    expect(checking.balance).toBe(150); // 200 - 50
-    expect(checking.txCount).toBe(2);
-    expect(savings.balance).toBe(1000);
-    expect(savings.txCount).toBe(1);
+describe('txRowClass', () => {
+  it('returns tx-row for reviewed cleared transaction', async () => {
+    const { txRowClass } = await import('../../src/screens/Accounts');
+    expect(txRowClass(makeTx({ transaction_id: 'a', reviewed: true, status: 'cleared' }))).toBe('tx-row');
   });
 
-  it('excludes transfer transactions from summaries', async () => {
-    const { buildAccountSummaries } = await import('../../src/screens/Accounts');
-    const txns = [
-      makeTx({ transaction_id: 't1', account: 'Checking', transaction_type: 'transfer', outflow: 500, inflow: 0 }),
-      makeTx({ transaction_id: 't2', account: 'Checking', outflow: 50, inflow: 0 }),
-    ];
-    const summaries = buildAccountSummaries(txns);
-    const checking = summaries.find((s) => s.name === 'Checking')!;
-
-    expect(checking.balance).toBe(-50);
-    expect(checking.txCount).toBe(1);
+  it('returns tx-row--unreviewed for unreviewed cleared transaction', async () => {
+    const { txRowClass } = await import('../../src/screens/Accounts');
+    expect(txRowClass(makeTx({ transaction_id: 'b', reviewed: false, status: 'cleared' }))).toBe('tx-row tx-row--unreviewed');
   });
 
-  it('sorts accounts by balance descending', async () => {
-    const { buildAccountSummaries } = await import('../../src/screens/Accounts');
-    const txns = [
-      makeTx({ transaction_id: 's1', account: 'Savings', inflow: 5000, outflow: 0 }),
-      makeTx({ transaction_id: 'c1', account: 'Checking', inflow: 100, outflow: 0 }),
-    ];
-    const summaries = buildAccountSummaries(txns);
-    expect(summaries[0].name).toBe('Savings');
-    expect(summaries[1].name).toBe('Checking');
-  });
-});
-
-describe('txStatusClass', () => {
-  it('returns dot--red for uncategorized transaction', async () => {
-    const { txStatusClass } = await import('../../src/screens/Accounts');
-    const tx = makeTx({ transaction_id: 'x1', category: '' });
-    expect(txStatusClass(tx)).toBe('dot--red');
+  it('returns tx-row--pending for pending transaction (reviewed or not)', async () => {
+    const { txRowClass } = await import('../../src/screens/Accounts');
+    expect(txRowClass(makeTx({ transaction_id: 'c', reviewed: false, status: 'pending' }))).toBe('tx-row tx-row--pending');
+    expect(txRowClass(makeTx({ transaction_id: 'd', reviewed: true, status: 'pending' }))).toBe('tx-row tx-row--pending');
   });
 
-  it('returns dot--orange for pending transaction with category', async () => {
-    const { txStatusClass } = await import('../../src/screens/Accounts');
-    const tx = makeTx({ transaction_id: 'x2', category: 'Groceries', status: 'pending' });
-    expect(txStatusClass(tx)).toBe('dot--orange');
-  });
-
-  it('returns dot--green for categorized cleared transaction', async () => {
-    const { txStatusClass } = await import('../../src/screens/Accounts');
-    const tx = makeTx({ transaction_id: 'x3', category: 'Groceries', status: 'cleared' });
-    expect(txStatusClass(tx)).toBe('dot--green');
-  });
-
-  it('returns dot--red even if pending but no category', async () => {
-    const { txStatusClass } = await import('../../src/screens/Accounts');
-    const tx = makeTx({ transaction_id: 'x4', category: '', status: 'pending' });
-    expect(txStatusClass(tx)).toBe('dot--red');
+  it('pending takes priority over unreviewed', async () => {
+    const { txRowClass } = await import('../../src/screens/Accounts');
+    const tx = makeTx({ transaction_id: 'e', reviewed: false, status: 'pending' });
+    expect(txRowClass(tx)).toBe('tx-row tx-row--pending');
+    expect(txRowClass(tx)).not.toContain('unreviewed');
   });
 });
 
 // ─── Component tests ─────────────────────────────────────────────────────────
 
-describe('Accounts screen — transaction list', () => {
-  // Use a recent date so transactions pass the 90-day cutoff
-  const today = new Date().toISOString().slice(0, 10);
-
+describe('Transactions screen — rendering', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
+    mockGetTransactionsByMonth.mockResolvedValue([]);
   });
 
   it('shows loading state while data is undefined', async () => {
-    mockToArray.mockReturnValue(new Promise(() => {})); // never resolves
+    mockGetTransactionsByMonth.mockReturnValue(new Promise(() => {})); // never resolves
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts unreviewedCount={null} />);
     expect(screen.getByText('Loading…')).toBeInTheDocument();
   });
 
-  it('renders transaction payees in the list', async () => {
-    mockToArray.mockResolvedValue([
-      makeTx({ transaction_id: 'tx1', payee: 'Whole Foods', date: today }),
-      makeTx({ transaction_id: 'tx2', payee: 'Netflix', date: today }),
+  it('renders transaction payees after load', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'tx1', payee: 'Whole Foods' }),
+      makeTx({ transaction_id: 'tx2', payee: 'Netflix' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts unreviewedCount={null} />);
@@ -168,174 +119,335 @@ describe('Accounts screen — transaction list', () => {
   });
 
   it('shows triage banner when unreviewedCount > 0', async () => {
-    mockToArray.mockResolvedValue([]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts unreviewedCount={3} />);
-
-    await waitFor(() => {
-      expect(screen.getByText(/3 transactions need categories/i)).toBeInTheDocument();
-    });
+    expect(screen.getByText(/3 transactions need categories/i)).toBeInTheDocument();
   });
 
   it('hides triage banner when unreviewedCount is 0', async () => {
-    mockToArray.mockResolvedValue([]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts unreviewedCount={0} />);
-
-    await waitFor(() => {
-      expect(screen.queryByText(/need categories/i)).not.toBeInTheDocument();
-    });
+    expect(screen.queryByText(/need categories/i)).not.toBeInTheDocument();
   });
 
-  it('filters to Uncategorized chip correctly', async () => {
-    mockToArray.mockResolvedValue([
-      makeTx({ transaction_id: 'cat', payee: 'Categorized Co', category: 'Groceries', date: today }),
-      makeTx({ transaction_id: 'uncat', payee: 'Uncategorized Co', category: '', date: today }),
+  it('shows All, Unreviewed, and Pending filter chips', async () => {
+    const { default: Accounts } = await import('../../src/screens/Accounts');
+    render(<Accounts unreviewedCount={null} />);
+    expect(screen.getByRole('button', { name: 'All' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Unreviewed' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pending' })).toBeInTheDocument();
+  });
+
+  it('shows a search input', async () => {
+    const { default: Accounts } = await import('../../src/screens/Accounts');
+    render(<Accounts unreviewedCount={null} />);
+    expect(screen.getByPlaceholderText(/search payee/i)).toBeInTheDocument();
+  });
+
+  it('shows a month picker in the header', async () => {
+    const { default: Accounts } = await import('../../src/screens/Accounts');
+    render(<Accounts unreviewedCount={null} />);
+    expect(document.querySelector('input[type="month"]')).toBeInTheDocument();
+  });
+});
+
+describe('Transactions screen — filter chips', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it('Unreviewed chip shows only unreviewed transactions', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'rev', payee: 'Reviewed Co', reviewed: true }),
+      makeTx({ transaction_id: 'unrev', payee: 'Unreviewed Co', reviewed: false }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts unreviewedCount={null} />);
 
-    const uncatChip = await screen.findByRole('button', { name: 'Uncategorized' });
-    fireEvent.click(uncatChip);
+    fireEvent.click(screen.getByRole('button', { name: 'Unreviewed' }));
 
     await waitFor(() => {
-      expect(screen.getByText('Uncategorized Co')).toBeInTheDocument();
-      expect(screen.queryByText('Categorized Co')).not.toBeInTheDocument();
+      expect(screen.getByText('Unreviewed Co')).toBeInTheDocument();
+      expect(screen.queryByText('Reviewed Co')).not.toBeInTheDocument();
     });
   });
 
-  it('filters by account chip correctly', async () => {
-    mockToArray.mockResolvedValue([
-      makeTx({ transaction_id: 'c1', payee: 'Checking Payee', account: 'Checking', date: today }),
-      makeTx({ transaction_id: 's1', payee: 'Savings Payee', account: 'Savings', date: today }),
+  it('Pending chip shows only pending transactions', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'clr', payee: 'Cleared Co', status: 'cleared' }),
+      makeTx({ transaction_id: 'pnd', payee: 'Pending Co', status: 'pending' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts unreviewedCount={null} />);
 
-    const checkingChip = await screen.findByRole('button', { name: 'Checking' });
-    fireEvent.click(checkingChip);
+    fireEvent.click(screen.getByRole('button', { name: 'Pending' }));
 
     await waitFor(() => {
-      expect(screen.getByText('Checking Payee')).toBeInTheDocument();
-      expect(screen.queryByText('Savings Payee')).not.toBeInTheDocument();
+      expect(screen.getByText('Pending Co')).toBeInTheDocument();
+      expect(screen.queryByText('Cleared Co')).not.toBeInTheDocument();
     });
   });
 
-  it('excludes transactions older than 90 days from the list', async () => {
-    const oldDate = new Date();
-    oldDate.setDate(oldDate.getDate() - 91);
-    const oldDateStr = oldDate.toISOString().slice(0, 10);
+  it('All chip restores full list after filtering', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'r', payee: 'Amazon', reviewed: true }),
+      makeTx({ transaction_id: 'u', payee: 'Netflix', reviewed: false }),
+    ]);
+    const { default: Accounts } = await import('../../src/screens/Accounts');
+    render(<Accounts unreviewedCount={null} />);
 
-    mockToArray.mockResolvedValue([
-      makeTx({ transaction_id: 'old', payee: 'Old Payee', date: oldDateStr }),
-      makeTx({ transaction_id: 'new', payee: 'New Payee', date: today }),
+    fireEvent.click(screen.getByRole('button', { name: 'Unreviewed' }));
+    await waitFor(() => expect(screen.queryByText('Amazon')).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+    await waitFor(() => {
+      expect(screen.getByText('Amazon')).toBeInTheDocument();
+      expect(screen.getByText('Netflix')).toBeInTheDocument();
+    });
+  });
+});
+
+describe('Transactions screen — search', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it('filters by payee name', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'a', payee: 'Amazon Prime' }),
+      makeTx({ transaction_id: 'b', payee: 'Netflix' }),
+    ]);
+    const { default: Accounts } = await import('../../src/screens/Accounts');
+    render(<Accounts unreviewedCount={null} />);
+
+    await waitFor(() => expect(screen.getByText('Amazon Prime')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByPlaceholderText(/search payee/i), { target: { value: 'amazon' } });
+
+    await waitFor(() => {
+      expect(screen.getByText('Amazon Prime')).toBeInTheDocument();
+      expect(screen.queryByText('Netflix')).not.toBeInTheDocument();
+    });
+  });
+
+  it('filters by category', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'g', payee: 'Trader Joes', category: 'Groceries' }),
+      makeTx({ transaction_id: 'd', payee: 'Chipotle', category: 'Dining Out' }),
+    ]);
+    const { default: Accounts } = await import('../../src/screens/Accounts');
+    render(<Accounts unreviewedCount={null} />);
+
+    await waitFor(() => expect(screen.getByText('Trader Joes')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByPlaceholderText(/search payee/i), { target: { value: 'groceries' } });
+
+    await waitFor(() => {
+      expect(screen.getByText('Trader Joes')).toBeInTheDocument();
+      expect(screen.queryByText('Chipotle')).not.toBeInTheDocument();
+    });
+  });
+
+  it('filters by memo', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'm1', payee: 'Store A', memo: 'birthday gift' }),
+      makeTx({ transaction_id: 'm2', payee: 'Store B', memo: '' }),
+    ]);
+    const { default: Accounts } = await import('../../src/screens/Accounts');
+    render(<Accounts unreviewedCount={null} />);
+
+    await waitFor(() => expect(screen.getByText('Store A')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByPlaceholderText(/search payee/i), { target: { value: 'birthday' } });
+
+    await waitFor(() => {
+      expect(screen.getByText('Store A')).toBeInTheDocument();
+      expect(screen.queryByText('Store B')).not.toBeInTheDocument();
+    });
+  });
+
+  it('search is case-insensitive', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'ci', payee: 'Whole Foods Market' }),
+    ]);
+    const { default: Accounts } = await import('../../src/screens/Accounts');
+    render(<Accounts unreviewedCount={null} />);
+
+    await waitFor(() => expect(screen.getByText('Whole Foods Market')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByPlaceholderText(/search payee/i), { target: { value: 'WHOLE' } });
+
+    await waitFor(() => expect(screen.getByText('Whole Foods Market')).toBeInTheDocument());
+  });
+});
+
+describe('Transactions screen — visual treatment', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it('applies tx-row--unreviewed class to unreviewed transactions', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'u', payee: 'Unknown Shop', reviewed: false, status: 'cleared' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts unreviewedCount={null} />);
 
     await waitFor(() => {
-      expect(screen.getByText('New Payee')).toBeInTheDocument();
-      expect(screen.queryByText('Old Payee')).not.toBeInTheDocument();
+      expect(document.querySelector('.tx-row--unreviewed')).toBeInTheDocument();
     });
   });
 
-  it('excludes split children (parent_id set) from the list', async () => {
-    mockToArray.mockResolvedValue([
-      makeTx({ transaction_id: 'parent', payee: 'Parent Tx', date: today }),
-      makeTx({ transaction_id: 'child', payee: 'Split Child', parent_id: 'parent', date: today }),
+  it('applies tx-row--pending class to pending transactions', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'p', payee: 'Pending Store', status: 'pending' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts unreviewedCount={null} />);
 
     await waitFor(() => {
-      expect(screen.getByText('Parent Tx')).toBeInTheDocument();
-      expect(screen.queryByText('Split Child')).not.toBeInTheDocument();
+      expect(document.querySelector('.tx-row--pending')).toBeInTheDocument();
     });
   });
 
-  it('navigates to /transactions/:id when a row is tapped', async () => {
-    mockToArray.mockResolvedValue([
-      makeTx({ transaction_id: 'tx-abc-123', payee: 'Amazon', date: today }),
+  it('shows green ✓ before category for reviewed transactions', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'rv', reviewed: true, category: 'Groceries', status: 'cleared' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts unreviewedCount={null} />);
 
-    const row = await screen.findByRole('button', { name: /Amazon/i });
+    await waitFor(() => {
+      expect(document.querySelector('.tx-reviewed-mark')).toBeInTheDocument();
+    });
+  });
+
+  it('does not show ✓ for unreviewed transactions', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'unrv', reviewed: false, category: 'Groceries' }),
+    ]);
+    const { default: Accounts } = await import('../../src/screens/Accounts');
+    render(<Accounts unreviewedCount={null} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Groceries')).toBeInTheDocument();
+      expect(document.querySelector('.tx-reviewed-mark')).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows ⏳ in meta for pending transactions', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'pd', payee: 'Bank Pending', status: 'pending', date: '2026-05-10' }),
+    ]);
+    const { default: Accounts } = await import('../../src/screens/Accounts');
+    render(<Accounts unreviewedCount={null} />);
+
+    await waitFor(() => {
+      const meta = document.querySelector('.tx-meta');
+      expect(meta?.textContent).toContain('⏳');
+    });
+  });
+
+  it('shows Uncategorized label in red class when no category', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'nc', payee: 'Mystery Store', category: '' }),
+    ]);
+    const { default: Accounts } = await import('../../src/screens/Accounts');
+    render(<Accounts unreviewedCount={null} />);
+
+    await waitFor(() => {
+      expect(document.querySelector('.tx-category--none')).toBeInTheDocument();
+      expect(document.querySelector('.tx-category--none')?.textContent).toContain('Uncategorized');
+    });
+  });
+
+  it('outflow amount has tx-amount--outflow class', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'out', outflow: 42.5, inflow: 0 }),
+    ]);
+    const { default: Accounts } = await import('../../src/screens/Accounts');
+    render(<Accounts unreviewedCount={null} />);
+
+    await waitFor(() => {
+      expect(document.querySelector('.tx-amount--outflow')?.textContent).toBe('-$42.50');
+    });
+  });
+
+  it('inflow amount has tx-amount--inflow class', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'in', outflow: 0, inflow: 1500 }),
+    ]);
+    const { default: Accounts } = await import('../../src/screens/Accounts');
+    render(<Accounts unreviewedCount={null} />);
+
+    await waitFor(() => {
+      expect(document.querySelector('.tx-amount--inflow')?.textContent).toBe('+$1,500.00');
+    });
+  });
+});
+
+describe('Transactions screen — detail bottom sheet', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it('opens bottom sheet when a transaction row is tapped', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'tx1', payee: 'Coffee Shop', category: 'Dining Out' }),
+    ]);
+    const { default: Accounts } = await import('../../src/screens/Accounts');
+    render(<Accounts unreviewedCount={null} />);
+
+    const row = await screen.findByRole('button', { name: /Coffee Shop/i });
     fireEvent.click(row);
 
-    expect(mockNavigate).toHaveBeenCalledWith('/transactions/tx-abc-123');
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
   });
 
-  it('shows outflow amounts in red class', async () => {
-    mockToArray.mockResolvedValue([
-      makeTx({ transaction_id: 'out1', payee: 'Grocery Store', outflow: 42.5, inflow: 0, date: today }),
+  it('bottom sheet shows transaction details', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'tx2', payee: 'Trader Joes', category: 'Groceries', outflow: 85, inflow: 0 }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts unreviewedCount={null} />);
 
-    await waitFor(() => {
-      // Use querySelector to target the tx-row amount specifically (not the account balance)
-      const amountEl = document.querySelector('.tx-amount--outflow');
-      expect(amountEl).toBeInTheDocument();
-      expect(amountEl?.textContent).toBe('-$42.50');
-    });
+    const row = await screen.findByRole('button', { name: /Trader Joes/i });
+    fireEvent.click(row);
+
+    expect(screen.getAllByText('Trader Joes').length).toBeGreaterThanOrEqual(1);
+    expect(document.querySelector('.tx-detail-hero')).toBeInTheDocument();
+    expect(document.querySelector('.tx-detail-amount')?.textContent).toBe('-$85.00');
   });
 
-  it('shows inflow amounts in green class', async () => {
-    mockToArray.mockResolvedValue([
-      makeTx({ transaction_id: 'in1', payee: 'Paycheck', outflow: 0, inflow: 1500, date: today }),
+  it('closes bottom sheet when Close is clicked', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'tx3', payee: 'Gym' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts unreviewedCount={null} />);
 
-    await waitFor(() => {
-      const amountEl = document.querySelector('.tx-amount--inflow');
-      expect(amountEl).toBeInTheDocument();
-      expect(amountEl?.textContent).toBe('+$1,500.00');
-    });
+    fireEvent.click(await screen.findByRole('button', { name: /Gym/i }));
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
   });
 
-  it('renders All, Uncategorized, and per-account filter chips', async () => {
-    mockToArray.mockResolvedValue([
-      makeTx({ transaction_id: 'c1', account: 'Checking', date: today }),
-      makeTx({ transaction_id: 's1', account: 'Savings', date: today }),
+  it('closes bottom sheet when backdrop overlay is clicked', async () => {
+    mockGetTransactionsByMonth.mockResolvedValue([
+      makeTx({ transaction_id: 'tx4', payee: 'Target' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts unreviewedCount={null} />);
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'All' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Uncategorized' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Checking' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Savings' })).toBeInTheDocument();
-    });
-  });
+    fireEvent.click(await screen.findByRole('button', { name: /Target/i }));
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
 
-  it('shows dot--red class for uncategorized transaction', async () => {
-    mockToArray.mockResolvedValue([
-      makeTx({ transaction_id: 'u1', payee: 'Unknown Shop', category: '', date: today }),
-    ]);
-    const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
-
-    await waitFor(() => {
-      const dot = document.querySelector('.dot--red');
-      expect(dot).toBeInTheDocument();
-    });
-  });
-
-  it('shows "Uncategorized" label in red when no category', async () => {
-    mockToArray.mockResolvedValue([
-      makeTx({ transaction_id: 'u2', payee: 'Mystery Store', category: '', date: today }),
-    ]);
-    const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
-
-    await waitFor(() => {
-      // Use querySelector to target the category span inside a tx-row (not the filter chip)
-      const catLabel = document.querySelector('.tx-category--none');
-      expect(catLabel).toBeInTheDocument();
-      expect(catLabel?.textContent).toBe('Uncategorized');
-    });
+    fireEvent.click(document.querySelector('.assign-overlay')!);
+    expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
   });
 });
