@@ -13,6 +13,19 @@ export async function getTransactionsByMonth(month: string): Promise<Transaction
     .sort((a, b) => b.date.localeCompare(a.date));
 }
 
+export async function getRecentTransactions(days: number): Promise<Transaction[]> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const results = await db.transactions
+    .where('date')
+    .aboveOrEqual(cutoffStr)
+    .toArray();
+  return results
+    .filter((t) => !t.parent_id)
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
 export async function searchTransactions(query: string): Promise<Transaction[]> {
   const q = query.toLowerCase();
   const results = await db.transactions

@@ -21,9 +21,11 @@ vi.mock('dexie-react-hooks', async () => {
   };
 });
 
-const mockGetTransactionsByMonth = vi.fn();
+const mockGetRecentTransactions = vi.fn();
+const mockSearchTransactions = vi.fn();
 vi.mock('../../src/db/queries', () => ({
-  getTransactionsByMonth: (...args: unknown[]) => mockGetTransactionsByMonth(...args),
+  getRecentTransactions: (...args: unknown[]) => mockGetRecentTransactions(...args),
+  searchTransactions: (...args: unknown[]) => mockSearchTransactions(...args),
 }));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -94,18 +96,19 @@ describe('Transactions screen — rendering', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
-    mockGetTransactionsByMonth.mockResolvedValue([]);
+    mockGetRecentTransactions.mockResolvedValue([]);
+    mockSearchTransactions.mockResolvedValue([]);
   });
 
   it('shows loading state while data is undefined', async () => {
-    mockGetTransactionsByMonth.mockReturnValue(new Promise(() => {})); // never resolves
+    mockGetRecentTransactions.mockReturnValue(new Promise(() => {})); // never resolves — stays undefined
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts unreviewedCount={null} />);
     expect(screen.getByText('Loading…')).toBeInTheDocument();
   });
 
   it('renders transaction payees after load', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
+    mockGetRecentTransactions.mockResolvedValue([
       makeTx({ transaction_id: 'tx1', payee: 'Whole Foods' }),
       makeTx({ transaction_id: 'tx2', payee: 'Netflix' }),
     ]);
@@ -144,10 +147,10 @@ describe('Transactions screen — rendering', () => {
     expect(screen.getByPlaceholderText(/search payee/i)).toBeInTheDocument();
   });
 
-  it('shows a month picker in the header', async () => {
+  it('shows scope hint with default range when no search', async () => {
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts unreviewedCount={null} />);
-    expect(document.querySelector('input[type="month"]')).toBeInTheDocument();
+    expect(screen.getByText(/last 90 days/i)).toBeInTheDocument();
   });
 });
 
@@ -158,7 +161,7 @@ describe('Transactions screen — filter chips', () => {
   });
 
   it('Unreviewed chip shows only unreviewed transactions', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
+    mockGetRecentTransactions.mockResolvedValue([
       makeTx({ transaction_id: 'rev', payee: 'Reviewed Co', reviewed: true }),
       makeTx({ transaction_id: 'unrev', payee: 'Unreviewed Co', reviewed: false }),
     ]);
@@ -174,7 +177,7 @@ describe('Transactions screen — filter chips', () => {
   });
 
   it('Pending chip shows only pending transactions', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
+    mockGetRecentTransactions.mockResolvedValue([
       makeTx({ transaction_id: 'clr', payee: 'Cleared Co', status: 'cleared' }),
       makeTx({ transaction_id: 'pnd', payee: 'Pending Co', status: 'pending' }),
     ]);
@@ -190,7 +193,7 @@ describe('Transactions screen — filter chips', () => {
   });
 
   it('All chip restores full list after filtering', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
+    mockGetRecentTransactions.mockResolvedValue([
       makeTx({ transaction_id: 'r', payee: 'Amazon', reviewed: true }),
       makeTx({ transaction_id: 'u', payee: 'Netflix', reviewed: false }),
     ]);
@@ -209,77 +212,83 @@ describe('Transactions screen — filter chips', () => {
 });
 
 describe('Transactions screen — search', () => {
+  // When search is active, the component calls searchTransactions (all-history).
+  // When empty, it calls getRecentTransactions (90-day default).
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
+    mockGetRecentTransactions.mockResolvedValue([]);
+    mockSearchTransactions.mockResolvedValue([]);
   });
 
-  it('filters by payee name', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
+  it('calls searchTransactions when user types a query', async () => {
+    mockSearchTransactions.mockResolvedValue([
       makeTx({ transaction_id: 'a', payee: 'Amazon Prime' }),
-      makeTx({ transaction_id: 'b', payee: 'Netflix' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts unreviewedCount={null} />);
-
-    await waitFor(() => expect(screen.getByText('Amazon Prime')).toBeInTheDocument());
 
     fireEvent.change(screen.getByPlaceholderText(/search payee/i), { target: { value: 'amazon' } });
 
-    await waitFor(() => {
-      expect(screen.getByText('Amazon Prime')).toBeInTheDocument();
-      expect(screen.queryByText('Netflix')).not.toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.getByText('Amazon Prime')).toBeInTheDocument());
+    expect(mockSearchTransactions).toHaveBeenCalledWith('amazon');
   });
 
-  it('filters by category', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
-      makeTx({ transaction_id: 'g', payee: 'Trader Joes', category: 'Groceries' }),
-      makeTx({ transaction_id: 'd', payee: 'Chipotle', category: 'Dining Out' }),
+  it('shows searchTransactions results (not getRecentTransactions) when searching', async () => {
+    mockGetRecentTransactions.mockResolvedValue([
+      makeTx({ transaction_id: 'recent', payee: 'Recent Payee' }),
+    ]);
+    mockSearchTransactions.mockResolvedValue([
+      makeTx({ transaction_id: 'found', payee: 'BGE Electric' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts unreviewedCount={null} />);
 
-    await waitFor(() => expect(screen.getByText('Trader Joes')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Recent Payee')).toBeInTheDocument());
 
-    fireEvent.change(screen.getByPlaceholderText(/search payee/i), { target: { value: 'groceries' } });
+    fireEvent.change(screen.getByPlaceholderText(/search payee/i), { target: { value: 'BGE' } });
 
     await waitFor(() => {
-      expect(screen.getByText('Trader Joes')).toBeInTheDocument();
-      expect(screen.queryByText('Chipotle')).not.toBeInTheDocument();
+      expect(screen.getByText('BGE Electric')).toBeInTheDocument();
+      expect(screen.queryByText('Recent Payee')).not.toBeInTheDocument();
     });
   });
 
-  it('filters by memo', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
-      makeTx({ transaction_id: 'm1', payee: 'Store A', memo: 'birthday gift' }),
-      makeTx({ transaction_id: 'm2', payee: 'Store B', memo: '' }),
+  it('reverts to getRecentTransactions when search is cleared', async () => {
+    mockGetRecentTransactions.mockResolvedValue([
+      makeTx({ transaction_id: 'r', payee: 'Whole Foods' }),
+    ]);
+    mockSearchTransactions.mockResolvedValue([
+      makeTx({ transaction_id: 's', payee: 'BGE Electric' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts unreviewedCount={null} />);
 
-    await waitFor(() => expect(screen.getByText('Store A')).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText(/search payee/i), { target: { value: 'BGE' } });
+    await waitFor(() => expect(screen.getByText('BGE Electric')).toBeInTheDocument());
 
-    fireEvent.change(screen.getByPlaceholderText(/search payee/i), { target: { value: 'birthday' } });
-
-    await waitFor(() => {
-      expect(screen.getByText('Store A')).toBeInTheDocument();
-      expect(screen.queryByText('Store B')).not.toBeInTheDocument();
-    });
+    fireEvent.change(screen.getByPlaceholderText(/search payee/i), { target: { value: '' } });
+    await waitFor(() => expect(screen.getByText('Whole Foods')).toBeInTheDocument());
+    expect(screen.queryByText('BGE Electric')).not.toBeInTheDocument();
   });
 
-  it('search is case-insensitive', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
-      makeTx({ transaction_id: 'ci', payee: 'Whole Foods Market' }),
+  it('shows "X results across all history" hint when searching', async () => {
+    mockSearchTransactions.mockResolvedValue([
+      makeTx({ transaction_id: 'h1', payee: 'BGE Electric' }),
+      makeTx({ transaction_id: 'h2', payee: 'BGE Gas' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts unreviewedCount={null} />);
 
-    await waitFor(() => expect(screen.getByText('Whole Foods Market')).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText(/search payee/i), { target: { value: 'BGE' } });
 
-    fireEvent.change(screen.getByPlaceholderText(/search payee/i), { target: { value: 'WHOLE' } });
+    await waitFor(() => expect(screen.getByText(/2 results across all history/i)).toBeInTheDocument());
+  });
 
-    await waitFor(() => expect(screen.getByText('Whole Foods Market')).toBeInTheDocument());
+  it('shows "Last 90 days" hint when not searching', async () => {
+    const { default: Accounts } = await import('../../src/screens/Accounts');
+    render(<Accounts unreviewedCount={null} />);
+    expect(screen.getByText(/last 90 days/i)).toBeInTheDocument();
   });
 });
 
@@ -290,7 +299,7 @@ describe('Transactions screen — visual treatment', () => {
   });
 
   it('applies tx-row--unreviewed class to unreviewed transactions', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
+    mockGetRecentTransactions.mockResolvedValue([
       makeTx({ transaction_id: 'u', payee: 'Unknown Shop', reviewed: false, status: 'cleared' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
@@ -302,7 +311,7 @@ describe('Transactions screen — visual treatment', () => {
   });
 
   it('applies tx-row--pending class to pending transactions', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
+    mockGetRecentTransactions.mockResolvedValue([
       makeTx({ transaction_id: 'p', payee: 'Pending Store', status: 'pending' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
@@ -314,7 +323,7 @@ describe('Transactions screen — visual treatment', () => {
   });
 
   it('shows green ✓ before category for reviewed transactions', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
+    mockGetRecentTransactions.mockResolvedValue([
       makeTx({ transaction_id: 'rv', reviewed: true, category: 'Groceries', status: 'cleared' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
@@ -326,7 +335,7 @@ describe('Transactions screen — visual treatment', () => {
   });
 
   it('does not show ✓ for unreviewed transactions', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
+    mockGetRecentTransactions.mockResolvedValue([
       makeTx({ transaction_id: 'unrv', reviewed: false, category: 'Groceries' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
@@ -339,7 +348,7 @@ describe('Transactions screen — visual treatment', () => {
   });
 
   it('shows ⏳ in meta for pending transactions', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
+    mockGetRecentTransactions.mockResolvedValue([
       makeTx({ transaction_id: 'pd', payee: 'Bank Pending', status: 'pending', date: '2026-05-10' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
@@ -352,7 +361,7 @@ describe('Transactions screen — visual treatment', () => {
   });
 
   it('shows Uncategorized label in red class when no category', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
+    mockGetRecentTransactions.mockResolvedValue([
       makeTx({ transaction_id: 'nc', payee: 'Mystery Store', category: '' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
@@ -365,7 +374,7 @@ describe('Transactions screen — visual treatment', () => {
   });
 
   it('outflow amount has tx-amount--outflow class', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
+    mockGetRecentTransactions.mockResolvedValue([
       makeTx({ transaction_id: 'out', outflow: 42.5, inflow: 0 }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
@@ -377,7 +386,7 @@ describe('Transactions screen — visual treatment', () => {
   });
 
   it('inflow amount has tx-amount--inflow class', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
+    mockGetRecentTransactions.mockResolvedValue([
       makeTx({ transaction_id: 'in', outflow: 0, inflow: 1500 }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
@@ -396,7 +405,7 @@ describe('Transactions screen — detail bottom sheet', () => {
   });
 
   it('opens bottom sheet when a transaction row is tapped', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
+    mockGetRecentTransactions.mockResolvedValue([
       makeTx({ transaction_id: 'tx1', payee: 'Coffee Shop', category: 'Dining Out' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
@@ -409,7 +418,7 @@ describe('Transactions screen — detail bottom sheet', () => {
   });
 
   it('bottom sheet shows transaction details', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
+    mockGetRecentTransactions.mockResolvedValue([
       makeTx({ transaction_id: 'tx2', payee: 'Trader Joes', category: 'Groceries', outflow: 85, inflow: 0 }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
@@ -424,7 +433,7 @@ describe('Transactions screen — detail bottom sheet', () => {
   });
 
   it('closes bottom sheet when Close is clicked', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
+    mockGetRecentTransactions.mockResolvedValue([
       makeTx({ transaction_id: 'tx3', payee: 'Gym' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
@@ -438,7 +447,7 @@ describe('Transactions screen — detail bottom sheet', () => {
   });
 
   it('closes bottom sheet when backdrop overlay is clicked', async () => {
-    mockGetTransactionsByMonth.mockResolvedValue([
+    mockGetRecentTransactions.mockResolvedValue([
       makeTx({ transaction_id: 'tx4', payee: 'Target' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');

@@ -1,14 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { getTransactionsByMonth } from '../db/queries';
+import { getRecentTransactions, searchTransactions } from '../db/queries';
 import { Transaction } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function toYYYYMM(d: Date): string {
-  return d.toISOString().slice(0, 7);
-}
+const RECENT_DAYS = 90;
 
 function fmt(n: number): string {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 });
@@ -79,43 +77,31 @@ const FILTERS: { key: FilterMode; label: string }[] = [
 
 export default function Accounts({ unreviewedCount }: { unreviewedCount: number | null }) {
   const navigate = useNavigate();
-  const [month, setMonth] = useState(() => toYYYYMM(new Date()));
   const [filter, setFilter] = useState<FilterMode>('all');
   const [search, setSearch] = useState('');
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
 
-  const monthTransactions = useLiveQuery(
-    () => getTransactionsByMonth(month),
-    [month]
+  const trimmedSearch = search.trim();
+
+  // No search → recent 90 days (fast indexed range query)
+  // With search → full-history scan across all IndexedDB records
+  const baseTransactions = useLiveQuery(
+    () => trimmedSearch ? searchTransactions(trimmedSearch) : getRecentTransactions(RECENT_DAYS),
+    [trimmedSearch]
   );
-  const loading = monthTransactions === undefined;
+  const loading = baseTransactions === undefined;
 
   const displayedTransactions = useMemo(() => {
-    let txns = monthTransactions ?? [];
+    let txns = baseTransactions ?? [];
     if (filter === 'unreviewed') txns = txns.filter((t) => !t.reviewed);
     if (filter === 'pending') txns = txns.filter((t) => t.status === 'pending');
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      txns = txns.filter(
-        (t) =>
-          t.payee?.toLowerCase().includes(q) ||
-          t.category?.toLowerCase().includes(q) ||
-          t.memo?.toLowerCase().includes(q)
-      );
-    }
     return txns;
-  }, [monthTransactions, filter, search]);
+  }, [baseTransactions, filter]);
 
   return (
     <div className="screen transactions-screen">
       <header className="screen-header">
         <h2 className="screen-title">Transactions</h2>
-        <input
-          type="month"
-          className="month-picker"
-          value={month}
-          onChange={(e) => setMonth(e.target.value)}
-        />
       </header>
 
       {unreviewedCount != null && unreviewedCount > 0 && (
@@ -144,6 +130,12 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
             {label}
           </button>
         ))}
+      </div>
+
+      <div className="tx-list-scope">
+        {trimmedSearch
+          ? `${baseTransactions?.length ?? '…'} result${baseTransactions?.length !== 1 ? 's' : ''} across all history`
+          : `Last ${RECENT_DAYS} days · search to see all history`}
       </div>
 
       {loading && <div className="state-msg">Loading…</div>}

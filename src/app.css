@@ -249,6 +249,11 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 .tx-search-input:focus { border-color: var(--accent); }
 
+.tx-list-scope {
+  padding: 5px 16px; font-size: 12px; color: var(--text-secondary);
+  background: var(--bg); border-bottom: 1px solid var(--border);
+}
+
 /* Filter chips */
 .filter-chips {
   display: flex; gap: 8px; padding: 10px 16px;
@@ -389,8 +394,8 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 
   /* Screen titles are redundant — top nav already shows where you are */
   .screen-title { display: none; }
-  /* Transactions header has month picker so keep it visible on desktop */
-  .transactions-screen .screen-header { display: flex; }
+  /* Transactions header is title-only — collapse it on desktop */
+  .transactions-screen .screen-header { display: none; }
 
   /* Bottom sheets → centered modals */
   .assign-overlay { align-items: center; justify-content: center; }
