@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { db } from '../../../src/db/schema';
 import {
   getTransactionsByMonth,
+  getRecentTransactions,
   searchTransactions,
   getTransactionsByCategory,
   getUnreviewedCount,
@@ -91,6 +92,37 @@ describe('getTransactionsByMonth', () => {
     ]);
 
     const result = await getTransactionsByMonth('2025-04');
+    expect(result).toHaveLength(1);
+    expect(result[0].transaction_id).toBe('parent');
+  });
+});
+
+describe('getRecentTransactions', () => {
+  beforeEach(resetDb);
+
+  it('returns transactions within the given day window, newest-first', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const old = new Date();
+    old.setDate(old.getDate() - 91);
+    const oldDate = old.toISOString().slice(0, 10);
+
+    await db.transactions.bulkPut([
+      makeTx({ transaction_id: 'recent', date: today }),
+      makeTx({ transaction_id: 'old', date: oldDate }),
+    ]);
+
+    const result = await getRecentTransactions(90);
+    expect(result.map((t) => t.transaction_id)).toEqual(['recent']);
+  });
+
+  it('excludes split children', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    await db.transactions.bulkPut([
+      makeTx({ transaction_id: 'parent', date: today }),
+      makeTx({ transaction_id: 'child', date: today, parent_id: 'parent' }),
+    ]);
+
+    const result = await getRecentTransactions(90);
     expect(result).toHaveLength(1);
     expect(result[0].transaction_id).toBe('parent');
   });
