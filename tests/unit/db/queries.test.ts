@@ -6,6 +6,11 @@ import {
   getRecentTransactions,
   searchTransactions,
   getTransactionsByCategory,
+  getTransactionsByAccount,
+  getCategorySuggestions,
+  getAccountSuggestions,
+  getPayeeSuggestions,
+  getTransactionsByPayee,
   getUnreviewedCount,
   getActiveBudgetCategories,
   getMonthAssignments,
@@ -165,15 +170,15 @@ describe('searchTransactions', () => {
     expect(await searchTransactions('breakfast')).toHaveLength(0);
   });
 
-  it('excludes split children', async () => {
+  it('includes split children so they are discoverable by search', async () => {
     await db.transactions.bulkPut([
-      makeTx({ transaction_id: 'parent', payee: 'Supermarket' }),
-      makeTx({ transaction_id: 'child', payee: 'Supermarket', parent_id: 'parent' }),
+      makeTx({ transaction_id: 'parent', payee: 'Daffy Charitable' }),
+      makeTx({ transaction_id: 'child', payee: 'EUMC Laurel', parent_id: 'parent' }),
     ]);
 
-    const result = await searchTransactions('supermarket');
+    const result = await searchTransactions('eumc');
     expect(result).toHaveLength(1);
-    expect(result[0].transaction_id).toBe('parent');
+    expect(result[0].transaction_id).toBe('child');
   });
 });
 
@@ -293,5 +298,189 @@ describe('getMonthAssignments', () => {
     const result = await getMonthAssignments('2025-04');
     expect(result).toHaveLength(2);
     expect(result.map((a) => a.category).sort()).toEqual(['Fuel ⛽', 'Groceries 🛒']);
+  });
+});
+
+describe('getCategorySuggestions', () => {
+  beforeEach(resetDb);
+
+  it('returns active categories matching partial query case-insensitively', async () => {
+    await db.budgetCategories.bulkPut([
+      makeCat({ category: 'Groceries 🛒', sort_order: 1, active: true }),
+      makeCat({ category: 'Fuel ⛽', sort_order: 2, active: true }),
+      makeCat({ category: 'Amara Summer Care ⛺️', sort_order: 3, active: true }),
+      makeCat({ category: 'Emory Summer Care ⛺️', sort_order: 4, active: true }),
+    ]);
+
+    const result = await getCategorySuggestions('summ');
+    expect(result).toEqual(['Amara Summer Care ⛺️', 'Emory Summer Care ⛺️']);
+  });
+
+  it('excludes inactive categories', async () => {
+    await db.budgetCategories.bulkPut([
+      makeCat({ category: 'Active Groceries', sort_order: 1, active: true }),
+      makeCat({ category: 'Inactive Groceries', sort_order: 2, active: false }),
+    ]);
+
+    const result = await getCategorySuggestions('groceries');
+    expect(result).toEqual(['Active Groceries']);
+  });
+
+  it('returns at most 6 results', async () => {
+    await db.budgetCategories.bulkPut(
+      Array.from({ length: 10 }, (_, i) =>
+        makeCat({ category: `Category ${i}`, sort_order: i, active: true })
+      )
+    );
+
+    const result = await getCategorySuggestions('category');
+    expect(result).toHaveLength(6);
+  });
+
+  it('returns empty array when no match', async () => {
+    await db.budgetCategories.bulkPut([makeCat({ category: 'Groceries', sort_order: 1, active: true })]);
+    expect(await getCategorySuggestions('zzz')).toEqual([]);
+  });
+});
+
+describe('getAccountSuggestions', () => {
+  beforeEach(resetDb);
+
+  it('returns unique accounts matching partial query case-insensitively', async () => {
+    await db.transactions.bulkPut([
+      makeTx({ transaction_id: 'a', account: 'Capital One Checking' }),
+      makeTx({ transaction_id: 'b', account: 'Capital One Savings' }),
+      makeTx({ transaction_id: 'c', account: 'Chase Freedom' }),
+      makeTx({ transaction_id: 'd', account: 'Capital One Checking' }), // duplicate account
+    ]);
+
+    const result = await getAccountSuggestions('capita');
+    expect(result).toEqual(['Capital One Checking', 'Capital One Savings']);
+  });
+
+  it('returns at most 6 unique accounts', async () => {
+    await db.transactions.bulkPut(
+      Array.from({ length: 8 }, (_, i) =>
+        makeTx({ transaction_id: `t${i}`, account: `Bank Account ${i}` })
+      )
+    );
+
+    const result = await getAccountSuggestions('bank');
+    expect(result).toHaveLength(6);
+  });
+
+  it('returns empty array when no match', async () => {
+    await db.transactions.bulkPut([makeTx({ transaction_id: 'x', account: 'Chase Freedom' })]);
+    expect(await getAccountSuggestions('zzz')).toEqual([]);
+  });
+});
+
+describe('getPayeeSuggestions', () => {
+  beforeEach(resetDb);
+
+  it('returns payees matching partial query case-insensitively', async () => {
+    await db.transactions.bulkPut([
+      makeTx({ transaction_id: 'a', payee: 'Amazon Prime' }),
+      makeTx({ transaction_id: 'b', payee: 'Amazon Fresh' }),
+      makeTx({ transaction_id: 'c', payee: 'Netflix' }),
+    ]);
+
+    const result = await getPayeeSuggestions('amaz');
+    expect(result).toContain('Amazon Prime');
+    expect(result).toContain('Amazon Fresh');
+    expect(result).not.toContain('Netflix');
+  });
+
+  it('deduplicates payees across transactions', async () => {
+    await db.transactions.bulkPut([
+      makeTx({ transaction_id: 'a', payee: 'Whole Foods' }),
+      makeTx({ transaction_id: 'b', payee: 'Whole Foods' }),
+    ]);
+
+    const result = await getPayeeSuggestions('whole');
+    expect(result).toHaveLength(1);
+    expect(result[0]).toBe('Whole Foods');
+  });
+
+  it('returns at most 6 results', async () => {
+    await db.transactions.bulkPut(
+      Array.from({ length: 8 }, (_, i) =>
+        makeTx({ transaction_id: `t${i}`, payee: `Payee Store ${i}` })
+      )
+    );
+
+    const result = await getPayeeSuggestions('payee');
+    expect(result).toHaveLength(6);
+  });
+
+  it('returns empty array when no match', async () => {
+    await db.transactions.bulkPut([makeTx({ transaction_id: 'x', payee: 'Starbucks' })]);
+    expect(await getPayeeSuggestions('zzz')).toEqual([]);
+  });
+});
+
+describe('getTransactionsByPayee', () => {
+  beforeEach(resetDb);
+
+  it('returns only transactions with the exact payee, newest-first', async () => {
+    await db.transactions.bulkPut([
+      makeTx({ transaction_id: 'a', payee: 'Amazon', date: '2025-04-01' }),
+      makeTx({ transaction_id: 'b', payee: 'Amazon', date: '2025-04-10' }),
+      makeTx({ transaction_id: 'c', payee: 'Netflix', date: '2025-04-05' }),
+    ]);
+
+    const result = await getTransactionsByPayee('Amazon');
+    expect(result.map((t) => t.transaction_id)).toEqual(['b', 'a']);
+  });
+
+  it('returns empty array when no match', async () => {
+    await db.transactions.bulkPut([makeTx({ transaction_id: 'x', payee: 'Starbucks' })]);
+    expect(await getTransactionsByPayee('Amazon')).toEqual([]);
+  });
+});
+
+describe('getTransactionsByAccount', () => {
+  beforeEach(resetDb);
+
+  it('returns only transactions for the given account, newest-first', async () => {
+    await db.transactions.bulkPut([
+      makeTx({ transaction_id: 'a', account: 'Checking', date: '2025-04-01' }),
+      makeTx({ transaction_id: 'b', account: 'Checking', date: '2025-04-10' }),
+      makeTx({ transaction_id: 'c', account: 'Savings', date: '2025-04-05' }),
+    ]);
+
+    const result = await getTransactionsByAccount('Checking');
+    expect(result.map((t) => t.transaction_id)).toEqual(['b', 'a']);
+  });
+
+  it('narrows by textQuery when provided', async () => {
+    await db.transactions.bulkPut([
+      makeTx({ transaction_id: 'a', account: 'Checking', payee: 'Amazon' }),
+      makeTx({ transaction_id: 'b', account: 'Checking', payee: 'Netflix' }),
+    ]);
+
+    const result = await getTransactionsByAccount('Checking', 'amazon');
+    expect(result).toHaveLength(1);
+    expect(result[0].transaction_id).toBe('a');
+  });
+
+  it('textQuery matches category and memo too', async () => {
+    await db.transactions.bulkPut([
+      makeTx({ transaction_id: 'a', account: 'Checking', payee: 'Store', category: 'Groceries', memo: '' }),
+      makeTx({ transaction_id: 'b', account: 'Checking', payee: 'Store', category: 'Fuel', memo: 'road trip' }),
+    ]);
+
+    expect(await getTransactionsByAccount('Checking', 'groceries')).toHaveLength(1);
+    expect(await getTransactionsByAccount('Checking', 'road trip')).toHaveLength(1);
+  });
+
+  it('includes split children', async () => {
+    await db.transactions.bulkPut([
+      makeTx({ transaction_id: 'parent', account: 'Checking', payee: 'Daffy Charitable' }),
+      makeTx({ transaction_id: 'child', account: 'Checking', payee: 'EUMC Laurel', parent_id: 'parent' }),
+    ]);
+
+    const result = await getTransactionsByAccount('Checking');
+    expect(result).toHaveLength(2);
   });
 });

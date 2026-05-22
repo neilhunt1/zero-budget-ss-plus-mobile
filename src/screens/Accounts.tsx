@@ -1,7 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { getRecentTransactions, searchTransactions } from '../db/queries';
+import {
+  getRecentTransactions,
+  searchTransactions,
+  getTransactionsByCategory,
+  getTransactionsByAccount,
+  getTransactionsByPayee,
+} from '../db/queries';
+import SearchBar, { type ActiveFilter } from '../components/SearchBar';
 import { Transaction } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -78,25 +85,97 @@ const FILTERS: { key: FilterMode; label: string }[] = [
 export default function Accounts({ unreviewedCount }: { unreviewedCount: number | null }) {
   const navigate = useNavigate();
   const [filter, setFilter] = useState<FilterMode>('all');
-  const [search, setSearch] = useState('');
+  const [rawQuery, setRawQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [activeFilter, setActiveFilter] = useState<ActiveFilter | null>(null);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
 
-  const trimmedSearch = search.trim();
+  // Debounce rawQuery → debouncedQuery (150ms)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(rawQuery.trim()), 150);
+    return () => clearTimeout(timer);
+  }, [rawQuery]);
 
-  // No search → recent 90 days (fast indexed range query)
-  // With search → full-history scan across all IndexedDB records
   const baseTransactions = useLiveQuery(
-    () => trimmedSearch ? searchTransactions(trimmedSearch) : getRecentTransactions(RECENT_DAYS),
-    [trimmedSearch]
+    () => {
+      if (activeFilter?.type === 'category') {
+        return getTransactionsByCategory(activeFilter.value);
+      }
+      if (activeFilter?.type === 'account') {
+        return getTransactionsByAccount(activeFilter.value, debouncedQuery || undefined);
+      }
+      if (activeFilter?.type === 'payee') {
+        return getTransactionsByPayee(activeFilter.value);
+      }
+      if (debouncedQuery) return searchTransactions(debouncedQuery);
+      return getRecentTransactions(RECENT_DAYS);
+    },
+    [activeFilter, debouncedQuery]
   );
-  const loading = baseTransactions === undefined;
+
+  // For category filter + text narrowing: client-side filter since getTransactionsByCategory returns all
+  const filteredBySearch = useMemo(() => {
+    if (!baseTransactions) return baseTransactions;
+    if (activeFilter?.type === 'category' && debouncedQuery) {
+      const q = debouncedQuery.toLowerCase();
+      return baseTransactions.filter(
+        (t) =>
+          t.payee?.toLowerCase().includes(q) ||
+          t.category?.toLowerCase().includes(q) ||
+          t.memo?.toLowerCase().includes(q)
+      );
+    }
+    return baseTransactions;
+  }, [baseTransactions, activeFilter, debouncedQuery]);
+
+  const loading = filteredBySearch === undefined;
 
   const displayedTransactions = useMemo(() => {
-    let txns = baseTransactions ?? [];
+    let txns = filteredBySearch ?? [];
     if (filter === 'unreviewed') txns = txns.filter((t) => !t.reviewed);
     if (filter === 'pending') txns = txns.filter((t) => t.status === 'pending');
     return txns;
-  }, [baseTransactions, filter]);
+  }, [filteredBySearch, filter]);
+
+  function handleSelectCategory(cat: string) {
+    setActiveFilter({ type: 'category', value: cat });
+    setRawQuery('');
+    setDebouncedQuery('');
+  }
+
+  function handleSelectAccount(acct: string) {
+    setActiveFilter({ type: 'account', value: acct });
+    setRawQuery('');
+    setDebouncedQuery('');
+  }
+
+  function handleSelectPayee(payee: string) {
+    setActiveFilter({ type: 'payee', value: payee });
+    setRawQuery('');
+    setDebouncedQuery('');
+  }
+
+  function handleSelectFreeText(query: string) {
+    setRawQuery(query);
+    setDebouncedQuery(query);
+  }
+
+  function handleClear() {
+    setRawQuery('');
+    setDebouncedQuery('');
+    setActiveFilter(null);
+  }
+
+  function scopeHint(): string {
+    const count = filteredBySearch?.length ?? '…';
+    if (activeFilter) {
+      return `${activeFilter.value} — ${count} transaction${filteredBySearch?.length !== 1 ? 's' : ''}`;
+    }
+    if (debouncedQuery) {
+      return `${count} result${filteredBySearch?.length !== 1 ? 's' : ''} across all history`;
+    }
+    return `Last ${RECENT_DAYS} days · search to see all history`;
+  }
 
   return (
     <div className="screen transactions-screen">
@@ -111,12 +190,15 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
       )}
 
       <div className="tx-search-wrap">
-        <input
-          type="search"
-          className="tx-search-input"
-          placeholder="Search payee, category, memo…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+        <SearchBar
+          rawQuery={rawQuery}
+          onChange={setRawQuery}
+          activeFilter={activeFilter}
+          onSelectCategory={handleSelectCategory}
+          onSelectAccount={handleSelectAccount}
+          onSelectPayee={handleSelectPayee}
+          onSelectFreeText={handleSelectFreeText}
+          onClear={handleClear}
         />
       </div>
 
@@ -132,11 +214,7 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
         ))}
       </div>
 
-      <div className="tx-list-scope">
-        {trimmedSearch
-          ? `${baseTransactions?.length ?? '…'} result${baseTransactions?.length !== 1 ? 's' : ''} across all history`
-          : `Last ${RECENT_DAYS} days · search to see all history`}
-      </div>
+      <div className="tx-list-scope">{scopeHint()}</div>
 
       {loading && <div className="state-msg">Loading…</div>}
 
@@ -152,7 +230,10 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
                 onClick={() => setSelectedTx(tx)}
               >
                 <div className="tx-row-main">
-                  <span className="tx-payee">{tx.payee || tx.description || '(unknown)'}</span>
+                  <span className="tx-payee">
+                    {tx.payee || tx.description || '(unknown)'}
+                    {tx.parent_id && <span className="tx-split-label"> (split)</span>}
+                  </span>
                   <span className="tx-meta">
                     {tx.account} · {tx.status === 'pending' ? '⏳ ' : ''}{tx.date}
                   </span>
