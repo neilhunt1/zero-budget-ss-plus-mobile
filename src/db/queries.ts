@@ -31,13 +31,59 @@ export async function searchTransactions(query: string): Promise<Transaction[]> 
   const results = await db.transactions
     .filter(
       (t) =>
-        !t.parent_id &&
-        (t.payee?.toLowerCase().includes(q) ||
-          t.category?.toLowerCase().includes(q) ||
-          t.memo?.toLowerCase().includes(q))
+        t.payee?.toLowerCase().includes(q) ||
+        t.category?.toLowerCase().includes(q) ||
+        t.memo?.toLowerCase().includes(q)
     )
     .toArray();
   return results.sort((a, b) => b.date.localeCompare(a.date));
+}
+
+export async function getCategorySuggestions(query: string): Promise<string[]> {
+  const q = query.toLowerCase();
+  const cats = await getActiveBudgetCategories();
+  return cats.filter((c) => c.category.toLowerCase().includes(q)).map((c) => c.category).slice(0, 5);
+}
+
+export async function getAccountSuggestions(query: string): Promise<string[]> {
+  const q = query.toLowerCase();
+  const allAccounts = (await db.transactions.orderBy('account').uniqueKeys()) as string[];
+  return allAccounts.filter((a) => a.toLowerCase().includes(q)).slice(0, 5);
+}
+
+export async function getPayeeSuggestions(query: string): Promise<string[]> {
+  const q = query.toLowerCase();
+  const seen = new Set<string>();
+  const result: string[] = [];
+  await db.transactions.each((tx) => {
+    if (result.length >= 5) return;
+    const p = tx.payee;
+    if (p && p.toLowerCase().includes(q) && !seen.has(p)) {
+      seen.add(p);
+      result.push(p);
+    }
+  });
+  return result;
+}
+
+export async function getTransactionsByPayee(payee: string): Promise<Transaction[]> {
+  const results = await db.transactions.filter((t) => t.payee === payee).toArray();
+  return results.sort((a, b) => b.date.localeCompare(a.date));
+}
+
+export async function getTransactionsByAccount(account: string, textQuery?: string): Promise<Transaction[]> {
+  const results = await db.transactions.where('account').equals(account).toArray();
+  const filtered = textQuery
+    ? results.filter((t) => {
+        const q = textQuery.toLowerCase();
+        return (
+          t.payee?.toLowerCase().includes(q) ||
+          t.category?.toLowerCase().includes(q) ||
+          t.memo?.toLowerCase().includes(q)
+        );
+      })
+    : results;
+  return filtered.sort((a, b) => b.date.localeCompare(a.date));
 }
 
 export async function getTransactionsByCategory(category: string): Promise<Transaction[]> {
