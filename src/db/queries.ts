@@ -42,13 +42,13 @@ export async function searchTransactions(query: string): Promise<Transaction[]> 
 export async function getCategorySuggestions(query: string): Promise<string[]> {
   const q = query.toLowerCase();
   const cats = await getActiveBudgetCategories();
-  return cats.filter((c) => c.category.toLowerCase().includes(q)).map((c) => c.category).slice(0, 5);
+  return cats.filter((c) => c.category.toLowerCase().includes(q)).map((c) => c.category).slice(0, 6);
 }
 
 export async function getAccountSuggestions(query: string): Promise<string[]> {
   const q = query.toLowerCase();
   const allAccounts = (await db.transactions.orderBy('account').uniqueKeys()) as string[];
-  return allAccounts.filter((a) => a.toLowerCase().includes(q)).slice(0, 5);
+  return allAccounts.filter((a) => a.toLowerCase().includes(q)).slice(0, 6);
 }
 
 export async function getPayeeSuggestions(query: string): Promise<string[]> {
@@ -56,7 +56,7 @@ export async function getPayeeSuggestions(query: string): Promise<string[]> {
   const seen = new Set<string>();
   const result: string[] = [];
   await db.transactions.each((tx) => {
-    if (result.length >= 5) return;
+    if (result.length >= 6) return;
     const p = tx.payee;
     if (p && p.toLowerCase().includes(q) && !seen.has(p)) {
       seen.add(p);

@@ -274,7 +274,7 @@ describe('getCategorySuggestions', () => {
     expect(result).toEqual(['Active Groceries']);
   });
 
-  it('returns at most 5 results', async () => {
+  it('returns at most 6 results', async () => {
     await db.budgetCategories.bulkPut(
       Array.from({ length: 10 }, (_, i) =>
         makeCat({ category: `Category ${i}`, sort_order: i, active: true })
@@ -282,7 +282,7 @@ describe('getCategorySuggestions', () => {
     );
 
     const result = await getCategorySuggestions('category');
-    expect(result).toHaveLength(5);
+    expect(result).toHaveLength(6);
   });
 
   it('returns empty array when no match', async () => {
@@ -306,7 +306,7 @@ describe('getAccountSuggestions', () => {
     expect(result).toEqual(['Capital One Checking', 'Capital One Savings']);
   });
 
-  it('returns at most 5 unique accounts', async () => {
+  it('returns at most 6 unique accounts', async () => {
     await db.transactions.bulkPut(
       Array.from({ length: 8 }, (_, i) =>
         makeTx({ transaction_id: `t${i}`, account: `Bank Account ${i}` })
@@ -314,7 +314,7 @@ describe('getAccountSuggestions', () => {
     );
 
     const result = await getAccountSuggestions('bank');
-    expect(result).toHaveLength(5);
+    expect(result).toHaveLength(6);
   });
 
   it('returns empty array when no match', async () => {
@@ -350,7 +350,7 @@ describe('getPayeeSuggestions', () => {
     expect(result[0]).toBe('Whole Foods');
   });
 
-  it('returns at most 5 results', async () => {
+  it('returns at most 6 results', async () => {
     await db.transactions.bulkPut(
       Array.from({ length: 8 }, (_, i) =>
         makeTx({ transaction_id: `t${i}`, payee: `Payee Store ${i}` })
@@ -358,7 +358,7 @@ describe('getPayeeSuggestions', () => {
     );
 
     const result = await getPayeeSuggestions('payee');
-    expect(result).toHaveLength(5);
+    expect(result).toHaveLength(6);
   });
 
   it('returns empty array when no match', async () => {

@@ -141,46 +141,55 @@ export default function SearchBar({
           {categorySuggestions.length > 0 && (
             <>
               <div className="suggestion-group-label">Category</div>
-              {categorySuggestions.map((cat) => (
+              {categorySuggestions.slice(0, 5).map((cat) => (
                 <button
                   key={cat}
                   className="suggestion-item"
                   role="option"
                   onClick={() => handleSelectCategory(cat)}
                 >
-                  Category is: {cat}
+                  <span className="suggestion-type">Category</span> {cat}
                 </button>
               ))}
+              {categorySuggestions.length > 5 && (
+                <div className="suggestion-more">And more — keep typing…</div>
+              )}
             </>
           )}
           {accountSuggestions.length > 0 && (
             <>
               <div className="suggestion-group-label">Account</div>
-              {accountSuggestions.map((acct) => (
+              {accountSuggestions.slice(0, 5).map((acct) => (
                 <button
                   key={acct}
                   className="suggestion-item"
                   role="option"
                   onClick={() => handleSelectAccount(acct)}
                 >
-                  Account: {acct}
+                  <span className="suggestion-type">Account</span> {acct}
                 </button>
               ))}
+              {accountSuggestions.length > 5 && (
+                <div className="suggestion-more">And more — keep typing…</div>
+              )}
             </>
           )}
           {payeeSuggestions.length > 0 && (
             <>
               <div className="suggestion-group-label">Payee</div>
-              {payeeSuggestions.map((payee) => (
+              {payeeSuggestions.slice(0, 5).map((payee) => (
                 <button
                   key={payee}
                   className="suggestion-item"
                   role="option"
                   onClick={() => handleSelectPayee(payee)}
                 >
-                  Payee: {payee}
+                  <span className="suggestion-type">Payee</span> {payee}
                 </button>
               ))}
+              {payeeSuggestions.length > 5 && (
+                <div className="suggestion-more">And more — keep typing…</div>
+              )}
             </>
           )}
           <button
