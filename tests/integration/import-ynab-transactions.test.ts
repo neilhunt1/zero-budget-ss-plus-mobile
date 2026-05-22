@@ -193,7 +193,36 @@ describeIf('import-ynab-transactions @integration', () => {
   }, TIMEOUT_MS);
 
   it('re-run produces no duplicates (tier-1 idempotency)', async () => {
-    // Read existing transactions
+    // Self-contained: rebuild the same deterministic rows and re-insert them.
+    // External IDs are a hash of CSV content (not timestamp), so same CSV always
+    // produces the same IDs. Re-inserting is safe — afterAll cleans up all copies.
+    // This makes the test resilient to concurrent CI runs that may clear the sheet
+    // between the previous test and this one.
+    const csvRows = parseCsv(TEST_CSV);
+    const groups = groupRows(csvRows);
+    const splitGroup = groups.find((g) => g.isSplit)!;
+    const importedAt = new Date().toISOString();
+    const { parentRow, parentId, splitGroupId } = buildSplitParentRow(splitGroup.rows, importedAt);
+    const childRows = buildSplitChildRows(
+      splitGroup.rows, parentId, splitGroupId, importedAt, new Map(),
+    );
+
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: sheetId,
+      range: 'Transactions!A2',
+      valueInputOption: 'RAW',
+      insertDataOption: 'INSERT_ROWS',
+      requestBody: { values: [parentRow, ...childRows] },
+    });
+
+    // Track for cleanup (no-op if already present — afterAll uses a Set)
+    if (!insertedExternalIds.includes(parentId)) insertedExternalIds.push(parentId);
+    for (const child of childRows) {
+      const childExtId = child[col('external_id')];
+      if (!insertedExternalIds.includes(childExtId)) insertedExternalIds.push(childExtId);
+    }
+
+    // Build existing from the live sheet and verify all IDs dedup as 'skip'
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
       range: 'Transactions!A2:Z',
@@ -211,10 +240,9 @@ describeIf('import-ynab-transactions @integration', () => {
         inflow: parseFloat(r[col('inflow')] ?? '0') || 0,
       }));
 
-    // All previously inserted external_ids should now dedup as 'skip'
-    for (const extId of insertedExternalIds) {
-      const result = checkDedup(extId, '', '', 0, 0, existing);
-      expect(result).toBe('skip');
+    expect(checkDedup(parentId, '', '', 0, 0, existing)).toBe('skip');
+    for (const child of childRows) {
+      expect(checkDedup(child[col('external_id')], '', '', 0, 0, existing)).toBe('skip');
     }
   }, TIMEOUT_MS);
 
