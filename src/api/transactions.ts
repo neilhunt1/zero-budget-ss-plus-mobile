@@ -162,10 +162,10 @@ export function classifyTransactionType(tx: Transaction): TransactionType | '' {
     return tx.transaction_type as TransactionType;
   }
   // Legacy mappings
-  if (tx.transaction_type === 'debit') return 'regular';
+  if ((tx.transaction_type as string) === 'debit') return 'regular';
   // 'credit_payment' was an old enum value before it was merged into 'transfer'
   if (tx.transaction_type === 'transfer' || (tx.transaction_type as string) === 'credit_payment') return 'transfer';
-  if (tx.transaction_type === 'credit') {
+  if ((tx.transaction_type as string) === 'credit') {
     return tx.inflow > 0 && !tx.category ? 'income' : 'regular';
   }
   // Blank — infer from data
