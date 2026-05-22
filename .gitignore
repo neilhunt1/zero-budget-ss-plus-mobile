@@ -14,3 +14,5 @@ service-account-*.json
 
 # Local data files (YNAB exports, etc.) — never commit
 data/
+
+.DS_Store
