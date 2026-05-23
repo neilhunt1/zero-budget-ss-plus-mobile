@@ -395,10 +395,31 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   padding: 12px 16px; border-bottom: 1px solid var(--border);
 }
 .tx-edit-toggle-label { font-size: 14px; }
-.tx-edit-amount-row {
-  display: flex; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--border);
+/* Two equal columns — used for Payee | Memo */
+.tx-edit-2col {
+  display: flex; gap: 0; border-bottom: 1px solid var(--border);
 }
-.tx-edit-amount-row .tx-edit-field { flex: 1; padding: 0; border-bottom: none; }
+.tx-edit-2col .tx-edit-field { flex: 1; border-bottom: none; }
+.tx-edit-2col .tx-edit-field + .tx-edit-field { border-left: 1px solid var(--border); }
+
+.tx-edit-amount-row {
+  display: flex; gap: 0; padding: 0; border-bottom: 1px solid var(--border);
+}
+.tx-edit-amount-row .tx-edit-field { flex: 1; border-bottom: none; }
+.tx-edit-amount-row .tx-edit-field + .tx-edit-field { border-left: 1px solid var(--border); }
+
+/* Four metadata fields on one line — Date | Account | Status | Reviewed */
+.tx-edit-meta-row {
+  display: flex; gap: 0; border-bottom: 1px solid var(--border); align-items: stretch;
+}
+.tx-edit-meta-row .tx-edit-field { flex: 1; border-bottom: none; min-width: 0; }
+.tx-edit-meta-row .tx-edit-field + .tx-edit-field { border-left: 1px solid var(--border); }
+.tx-edit-field--shrink { flex: 0 0 auto !important; }
+.tx-edit-field--center { align-items: center; }
+.tx-edit-checkbox {
+  width: 20px; height: 20px; cursor: pointer; accent-color: var(--accent);
+  margin-top: 4px;
+}
 .tx-edit-cat-filter {
   margin: 8px 16px; border: 1px solid var(--border); border-radius: 8px;
   padding: 8px 10px; font-size: 14px; background: var(--bg); color: var(--text);

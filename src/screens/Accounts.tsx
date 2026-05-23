@@ -155,14 +155,27 @@ function TxDetailEditor({
 
   const formContent = (
     <>
-      <div className="tx-edit-field">
-        <label className="tx-edit-label">Payee</label>
-        <input
-          className="tx-edit-input"
-          value={form.payee}
-          onChange={(e) => setField('payee', e.target.value)}
-        />
+      {/* Row 1: Payee | Memo — both short free-text, share the width */}
+      <div className="tx-edit-2col">
+        <div className="tx-edit-field">
+          <label className="tx-edit-label">Payee</label>
+          <input
+            className="tx-edit-input"
+            value={form.payee}
+            onChange={(e) => setField('payee', e.target.value)}
+          />
+        </div>
+        <div className="tx-edit-field">
+          <label className="tx-edit-label">Memo</label>
+          <input
+            className="tx-edit-input"
+            value={form.memo}
+            onChange={(e) => setField('memo', e.target.value)}
+          />
+        </div>
       </div>
+
+      {/* Row 2: Category picker — needs full width for the list */}
       <div className="tx-edit-section-title">Category</div>
       <input
         className="tx-edit-cat-filter"
@@ -185,15 +198,8 @@ function TxDetailEditor({
           ))
         )}
       </div>
-      <div className="tx-edit-section-title">Details</div>
-      <div className="tx-edit-field">
-        <label className="tx-edit-label">Memo</label>
-        <input
-          className="tx-edit-input"
-          value={form.memo}
-          onChange={(e) => setField('memo', e.target.value)}
-        />
-      </div>
+
+      {/* Row 3: Outflow | Inflow */}
       <div className="tx-edit-amount-row">
         <div className="tx-edit-field">
           <label className="tx-edit-label">Outflow</label>
@@ -226,43 +232,49 @@ function TxDetailEditor({
           />
         </div>
       </div>
-      <div className="tx-edit-field">
-        <label className="tx-edit-label">Date</label>
-        <input
-          className="tx-edit-input"
-          type="date"
-          value={form.date}
-          onChange={(e) => setField('date', e.target.value)}
-        />
+
+      {/* Row 4: Date | Account | Status | Reviewed — all metadata, one line */}
+      <div className="tx-edit-meta-row">
+        <div className="tx-edit-field">
+          <label className="tx-edit-label">Date</label>
+          <input
+            className="tx-edit-input"
+            type="date"
+            value={form.date}
+            onChange={(e) => setField('date', e.target.value)}
+          />
+        </div>
+        <div className="tx-edit-field">
+          <label className="tx-edit-label">Account</label>
+          <input
+            className="tx-edit-input"
+            value={form.account}
+            onChange={(e) => setField('account', e.target.value)}
+          />
+        </div>
+        <div className="tx-edit-field tx-edit-field--shrink">
+          <label className="tx-edit-label">Status</label>
+          <select
+            className="tx-edit-select"
+            value={form.status}
+            onChange={(e) => setField('status', e.target.value as TransactionStatus)}
+          >
+            <option value="cleared">Cleared</option>
+            <option value="pending">Pending</option>
+            <option value="manual">Manual</option>
+          </select>
+        </div>
+        <div className="tx-edit-field tx-edit-field--shrink tx-edit-field--center">
+          <label className="tx-edit-label">Reviewed</label>
+          <input
+            type="checkbox"
+            className="tx-edit-checkbox"
+            checked={form.reviewed}
+            onChange={(e) => setField('reviewed', e.target.checked)}
+          />
+        </div>
       </div>
-      <div className="tx-edit-field">
-        <label className="tx-edit-label">Account</label>
-        <input
-          className="tx-edit-input"
-          value={form.account}
-          onChange={(e) => setField('account', e.target.value)}
-        />
-      </div>
-      <div className="tx-edit-field">
-        <label className="tx-edit-label">Status</label>
-        <select
-          className="tx-edit-select"
-          value={form.status}
-          onChange={(e) => setField('status', e.target.value as TransactionStatus)}
-        >
-          <option value="cleared">Cleared</option>
-          <option value="pending">Pending</option>
-          <option value="manual">Manual</option>
-        </select>
-      </div>
-      <div className="tx-edit-toggle-row">
-        <span className="tx-edit-toggle-label">Reviewed</span>
-        <input
-          type="checkbox"
-          checked={form.reviewed}
-          onChange={(e) => setField('reviewed', e.target.checked)}
-        />
-      </div>
+
       {error && <div className="tx-edit-error">{error}</div>}
       <div className="tx-edit-actions">
         <button className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
