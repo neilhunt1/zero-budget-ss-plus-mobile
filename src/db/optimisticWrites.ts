@@ -62,6 +62,25 @@ export async function optimisticConfirmTransfer(
 }
 
 /**
+ * Edit arbitrary fields on an existing transaction.
+ * Updates IndexedDB immediately, then writes to Sheets.
+ * On Sheets failure, reverts IndexedDB and re-throws.
+ */
+export async function optimisticEditTransaction(
+  tx: Transaction,
+  changes: Partial<Transaction>,
+  client: SheetsClient
+): Promise<void> {
+  await db.transactions.update(tx.transaction_id, changes);
+  try {
+    await updateTransactionFields(client, tx._rowIndex, changes);
+  } catch (e) {
+    await db.transactions.put(tx);
+    throw e;
+  }
+}
+
+/**
  * Assign a category to a purchase transaction.
  * Updates IndexedDB immediately, then writes to Sheets.
  * On Sheets failure, reverts IndexedDB and re-throws.

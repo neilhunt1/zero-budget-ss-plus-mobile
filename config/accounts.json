@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "accounts": [
+    {
+      "display_name": "IHG MasterCard",
+      "aliases": {
+        "bts": "Chase CREDIT CARD (2898)",
+        "ynab": "IHG One Rewards Premier Credit Card - CREDIT CARD"
+      }
+    },
+    {
+      "display_name": "Prime Visa",
+      "aliases": {
+        "bts": "Chase CREDIT CARD (8368)",
+        "ynab": "Prime Visa - CREDIT CARD"
+      }
+    },
+    {
+      "display_name": "Disney Visa",
+      "aliases": {
+        "bts": "Chase-Disney CREDIT CARD (2950)",
+        "ynab": "Disney Visa"
+      }
+    },
+    {
+      "display_name": "CapitalOne Checking",
+      "aliases": {
+        "bts": "Capital One 360 Checking (6650)",
+        "ynab": "360 Checking"
+      }
+    },
+    {
+      "display_name": "CapitalOne Savings",
+      "aliases": {
+        "bts": "Capital One 360 Performance Savings (6128)",
+        "ynab": "360 Performance Savings"
+      }
+    }
+  ]
+}

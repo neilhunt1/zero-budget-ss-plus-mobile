@@ -368,6 +368,109 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .detail-label { font-size: 13px; color: var(--text-secondary); flex-shrink: 0; }
 .detail-value { font-size: 14px; font-weight: 500; text-align: right; word-break: break-word; margin-left: 12px; }
 
+/* ── Transaction editor (mobile bottom-sheet fields + desktop inline) ─────── */
+.tx-edit-section-title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--text-secondary); padding: 12px 16px 6px; font-weight: 600;
+}
+.tx-edit-field {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 16px; border-bottom: 1px solid var(--border);
+}
+.tx-edit-label { font-size: 12px; color: var(--text-secondary); }
+.tx-edit-input {
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; font-size: 14px; background: var(--bg); color: var(--text);
+  width: 100%; font-family: inherit;
+}
+.tx-edit-input:focus { border-color: var(--accent); outline: none; }
+.tx-edit-select {
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; font-size: 14px; background: var(--bg); color: var(--text);
+  width: 100%; font-family: inherit; appearance: none;
+}
+.tx-edit-select:focus { border-color: var(--accent); outline: none; }
+.tx-edit-toggle-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+}
+.tx-edit-toggle-label { font-size: 14px; }
+/* Transaction type selector (Income / Regular / Transfer) */
+.tx-edit-type-row {
+  display: flex; gap: 8px; padding: 10px 16px;
+  border-bottom: 1px solid var(--border); background: var(--bg);
+}
+.tx-edit-type-pill {
+  flex: 1; padding: 7px 4px; border-radius: 8px; font-size: 13px; font-weight: 600;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary);
+  cursor: pointer; transition: background .12s, color .12s, border-color .12s;
+}
+.tx-edit-type-pill:hover { background: #f0f4ff; color: var(--text); }
+.tx-edit-type-pill--active {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+}
+.tx-edit-type-note {
+  padding: 14px 16px; font-size: 13px; color: var(--text-secondary);
+  border-bottom: 1px solid var(--border); font-style: italic;
+}
+
+/* Two equal columns — used for Payee | Memo */
+.tx-edit-2col {
+  display: flex; gap: 0; border-bottom: 1px solid var(--border);
+}
+.tx-edit-2col .tx-edit-field { flex: 1; border-bottom: none; }
+.tx-edit-2col .tx-edit-field + .tx-edit-field { border-left: 1px solid var(--border); }
+
+.tx-edit-amount-row {
+  display: flex; gap: 0; padding: 0; border-bottom: 1px solid var(--border);
+}
+.tx-edit-amount-row .tx-edit-field { flex: 1; border-bottom: none; }
+.tx-edit-amount-row .tx-edit-field + .tx-edit-field { border-left: 1px solid var(--border); }
+
+/* Four metadata fields on one line — Date | Account | Status | Reviewed */
+.tx-edit-meta-row {
+  display: flex; gap: 0; border-bottom: 1px solid var(--border); align-items: stretch;
+}
+.tx-edit-meta-row .tx-edit-field { flex: 1; border-bottom: none; min-width: 0; }
+.tx-edit-meta-row .tx-edit-field + .tx-edit-field { border-left: 1px solid var(--border); }
+.tx-edit-field--shrink { flex: 0 0 auto !important; }
+.tx-edit-field--center { align-items: center; }
+.tx-edit-checkbox {
+  width: 20px; height: 20px; cursor: pointer; accent-color: var(--accent);
+  margin-top: 4px;
+}
+.tx-edit-cat-filter {
+  margin: 8px 16px; border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; font-size: 14px; background: var(--bg); color: var(--text);
+  width: calc(100% - 32px); font-family: inherit;
+}
+.tx-edit-cat-filter:focus { border-color: var(--accent); outline: none; }
+.tx-edit-cat-list { max-height: 200px; overflow-y: auto; }
+.tx-edit-cat-item {
+  display: flex; align-items: center; padding: 11px 16px;
+  border-bottom: 1px solid var(--border); background: var(--surface);
+  width: 100%; text-align: left; font: inherit; cursor: pointer;
+  border-left: none; border-right: none; border-top: none;
+}
+.tx-edit-cat-item:hover { background: #f8faff; }
+.tx-edit-cat-item--selected { background: #eef3fb; color: var(--accent); font-weight: 600; }
+.tx-edit-cat-none { padding: 12px 16px; font-size: 13px; color: var(--text-secondary); }
+.tx-edit-actions {
+  display: flex; gap: 12px; padding: 16px;
+}
+.tx-edit-actions > button { flex: 1; }
+.tx-edit-error {
+  margin: 0 16px 8px; font-size: 13px; color: var(--negative); text-align: center;
+}
+
+/* Desktop: inline expansion below the tapped row */
+.tx-edit-inline {
+  background: var(--surface);
+  border-bottom: 2px solid var(--accent);
+}
+.tx-edit-inline .tx-edit-actions { justify-content: flex-end; }
+.tx-edit-inline .tx-edit-actions > button { flex: unset; }
+
 /* ── Reflect screen ───────────────────────────────────────────────────────── */
 .reflect-stats {
   display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
@@ -498,6 +601,100 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   .plan-group-tab-name { flex: 1; }
   .plan-group-tab-total { font-size: 12px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
   .plan-group-tab-total.negative { color: var(--negative); }
+
+  /* ── Desktop transaction list ─────────────────────────────────────── */
+  /* column order: date | account | payee | category | memo | outflow | inflow | type | rev | clr */
+  .tx-desktop-cols {
+    display: grid;
+    grid-template-columns: 68px 130px 1fr 0.7fr 0.4fr 82px 82px 26px 24px 34px;
+    align-items: center;
+    gap: 0 10px;
+    padding: 0 16px;
+  }
+  .tx-list-header {
+    border-bottom: 2px solid var(--border);
+    padding-top: 4px;
+    padding-bottom: 6px;
+    background: var(--bg);
+    position: sticky;
+    top: var(--nav-height);
+    z-index: 10;
+  }
+  .tx-list-header span {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    color: var(--text-secondary);
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .tx-list-header .tx-hdr-num { text-align: right; }
+  .tx-row-desktop {
+    min-height: 40px;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+  }
+  .tx-row-desktop:hover { background: #f8faff; }
+  .tx-row-desktop.tx-row--unreviewed { background: #fffbeb; }
+  .tx-row-desktop.tx-row--unreviewed:hover { background: #fff8d6; }
+  .tx-row-desktop.tx-row--pending { opacity: .65; }
+  .tx-row-desktop.tx-row--selected { background: #eef3fb; }
+  .tx-desktop-cell {
+    font-size: 13px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--text);
+  }
+  .tx-desktop-cell--secondary { color: var(--text-secondary); }
+  .tx-desktop-cell--payee { font-weight: 600; }
+  .tx-desktop-cell--cat-none { color: var(--negative); }
+  .tx-desktop-cell--num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+  .tx-desktop-cell--outflow { color: var(--negative); }
+  .tx-desktop-cell--inflow { color: var(--positive); }
+
+  /* Icon columns: Type | Reviewed | Cleared */
+  .tx-desktop-cell--icon {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; overflow: visible;
+  }
+  /* Reviewed ✓ */
+  .tx-rev-mark {
+    font-size: 13px; font-weight: 700; color: var(--positive);
+    line-height: 1;
+  }
+  /* Cleared: YNAB-style circle with letter C */
+  .tx-clr-icon {
+    width: 20px; height: 20px; border-radius: 50%;
+    border: 2px solid #ccc;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 800; color: #bbb;
+    flex-shrink: 0; line-height: 1;
+  }
+  .tx-clr-icon--cleared {
+    background: var(--positive); border-color: var(--positive); color: #fff;
+  }
+  .tx-clr-icon--pending {
+    border-color: #d4900a; color: #d4900a;
+  }
+  /* Header for icon columns — use small symbol instead of text */
+  .tx-list-header .tx-hdr-icon {
+    text-align: center; font-size: 12px; letter-spacing: 0; text-transform: none;
+  }
 }
 
 /* ── Nav badge ────────────────────────────────────────────────────────────── */
