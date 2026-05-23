@@ -181,11 +181,6 @@ function TxDetailEditor({
     }
   }
 
-  // Pair-finder: shown when type is transfer/cc_payment and no pair is linked yet
-  const showPairFinder =
-    (form.transaction_type === 'transfer' || form.transaction_type === 'credit_payment') &&
-    !tx.transfer_pair_id;
-
   function handleFindPair() {
     const found =
       form.transaction_type === 'credit_payment'
@@ -208,6 +203,24 @@ function TxDetailEditor({
       onClose();
     } catch {
       setError('Link failed. Check your connection and try again.');
+      setLinkingPair(false);
+    }
+  }
+
+  async function handleUnlink() {
+    if (!token) return;
+    setLinkingPair(true);
+    setError(null);
+    try {
+      const client = new SheetsClient(SHEET_ID, token);
+      const pairedTx = allTxns.find((t) => t.transaction_id === tx.transfer_pair_id);
+      await optimisticEditTransaction(tx, { transfer_pair_id: '' }, client);
+      if (pairedTx) {
+        await optimisticEditTransaction(pairedTx, { transfer_pair_id: '' }, client);
+      }
+      onClose();
+    } catch {
+      setError('Unlink failed. Check your connection and try again.');
       setLinkingPair(false);
     }
   }
@@ -291,10 +304,22 @@ function TxDetailEditor({
               : '↔️ Transfer transactions don\'t have a category.'}
           </div>
 
-          {/* Pair finder — only for unlinked transfer / cc_payment */}
-          {showPairFinder && (
+          {/* Pair linking — for transfer / cc_payment: link, unlink, or find */}
+          {(form.transaction_type === 'transfer' || form.transaction_type === 'credit_payment') && (
             <div className="tx-edit-pair-finder">
-              {tx.transfer_pair_id ? null : pairCandidate === null ? (
+              {tx.transfer_pair_id ? (
+                /* Already linked — show paired account with unlink option */
+                <div className="tx-edit-pair-result tx-edit-pair-result--linked">
+                  <span className="tx-edit-pair-label">
+                    Paired with: {getAccountDisplayName(
+                      allTxns.find((t) => t.transaction_id === tx.transfer_pair_id)?.account ?? ''
+                    ) || '(unknown)'}
+                  </span>
+                  <button className="btn btn-ghost" onClick={handleUnlink} disabled={linkingPair}>
+                    {linkingPair ? 'Unlinking…' : '🔗 Unlink pair'}
+                  </button>
+                </div>
+              ) : pairCandidate === null ? (
                 <button className="btn btn-secondary" onClick={handleFindPair}>
                   🔍 Find matching pair
                 </button>
@@ -499,22 +524,29 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
 
   // Collapse transfer/cc-payment pairs into a single primary row.
   // Primary = the outflow leg (or the first encountered when both are inflow-only).
+  // Only collapse when the link is mutual (both legs point to each other) to avoid
+  // showing the wrong pair if stale/one-directional transfer_pair_id data exists.
   const { visibleRows, pairMap } = useMemo(() => {
     const byId = new Map(displayedTransactions.map((t) => [t.transaction_id, t]));
-    const suppressed = new Set<string>();
+    const suppressed = new Set<string>(); // secondary legs — hidden entirely
+    const processed = new Set<string>();  // primaries already in visibleRows
     const pairMap = new Map<string, Transaction>(); // primary_id → secondary tx
     const visibleRows: Transaction[] = [];
 
     for (const tx of displayedTransactions) {
-      if (suppressed.has(tx.transaction_id)) continue;
+      if (suppressed.has(tx.transaction_id) || processed.has(tx.transaction_id)) continue;
       const pairTx = tx.transfer_pair_id ? byId.get(tx.transfer_pair_id) : undefined;
-      if (pairTx && !suppressed.has(pairTx.transaction_id)) {
+      // Require mutual links: each leg must reference the other's ID
+      const isMutual = pairTx?.transfer_pair_id === tx.transaction_id;
+      if (pairTx && isMutual && !suppressed.has(pairTx.transaction_id) && !processed.has(pairTx.transaction_id)) {
         // Prefer the outflow leg as primary
         const [primary, secondary] = tx.outflow >= pairTx.outflow ? [tx, pairTx] : [pairTx, tx];
         suppressed.add(secondary.transaction_id);
+        processed.add(primary.transaction_id);
         pairMap.set(primary.transaction_id, secondary);
         visibleRows.push(primary);
       } else {
+        processed.add(tx.transaction_id);
         visibleRows.push(tx);
       }
     }
