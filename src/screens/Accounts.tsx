@@ -10,11 +10,12 @@ import {
 } from '../db/queries';
 import { db } from '../db/schema';
 import SearchBar, { type ActiveFilter } from '../components/SearchBar';
-import { Transaction, BudgetCategory, TransactionStatus } from '../types';
+import { Transaction, BudgetCategory, TransactionStatus, TransactionType } from '../types';
 import { useAuth } from '../hooks/useAuth';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { SheetsClient } from '../api/client';
 import { optimisticEditTransaction } from '../db/optimisticWrites';
+import { classifyTransactionType } from '../api/transactions';
 import { getAccountDisplayName } from '../utils/accountNames';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -53,6 +54,7 @@ function txDesktopRowClass(tx: Transaction, selected: boolean): string {
 
 type FormState = {
   payee: string;
+  transaction_type: TransactionType | '';
   category: string;
   memo: string;
   outflow: string;
@@ -66,6 +68,7 @@ type FormState = {
 function initForm(tx: Transaction): FormState {
   return {
     payee: tx.payee,
+    transaction_type: classifyTransactionType(tx),
     category: tx.category,
     memo: tx.memo,
     outflow: tx.outflow > 0 ? String(tx.outflow) : '',
@@ -77,6 +80,12 @@ function initForm(tx: Transaction): FormState {
   };
 }
 
+const TX_TYPES: { value: TransactionType; label: string }[] = [
+  { value: 'income',   label: '💰 Income'   },
+  { value: 'regular',  label: '🛒 Regular'  },
+  { value: 'transfer', label: '↔️ Transfer' },
+];
+
 function buildDiff(
   tx: Transaction,
   form: FormState,
@@ -84,6 +93,17 @@ function buildDiff(
 ): Partial<Transaction> {
   const changes: Partial<Transaction> = {};
   if (form.payee !== tx.payee) changes.payee = form.payee;
+  // transaction_type: compare against the normalised effective type
+  const effectiveType = classifyTransactionType(tx);
+  if (form.transaction_type && form.transaction_type !== effectiveType) {
+    changes.transaction_type = form.transaction_type;
+    // Clear category when reclassifying away from regular
+    if (form.transaction_type !== 'regular') {
+      changes.category = '';
+      changes.category_group = '';
+      changes.category_type = '';
+    }
+  }
   if (form.category !== tx.category) {
     changes.category = form.category;
     changes.category_group = catRecord?.category_group ?? '';
@@ -155,6 +175,27 @@ function TxDetailEditor({
 
   const formContent = (
     <>
+      {/* Type selector — income / regular / transfer */}
+      <div className="tx-edit-type-row">
+        {TX_TYPES.map(({ value, label }) => (
+          <button
+            key={value}
+            className={`tx-edit-type-pill${form.transaction_type === value ? ' tx-edit-type-pill--active' : ''}`}
+            onClick={() => {
+              setForm((f) => ({
+                ...f,
+                transaction_type: value,
+                // clear category when switching away from regular
+                ...(value !== 'regular' ? { category: '' } : {}),
+              }));
+              setError(null);
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Row 1: Payee | Memo — both short free-text, share the width */}
       <div className="tx-edit-2col">
         <div className="tx-edit-field">
@@ -175,29 +216,39 @@ function TxDetailEditor({
         </div>
       </div>
 
-      {/* Row 2: Category picker — needs full width for the list */}
-      <div className="tx-edit-section-title">Category</div>
-      <input
-        className="tx-edit-cat-filter"
-        placeholder="Search categories…"
-        value={catFilter}
-        onChange={(e) => setCatFilter(e.target.value)}
-      />
-      <div className="tx-edit-cat-list">
-        {filteredCats.length === 0 ? (
-          <div className="tx-edit-cat-none">No categories match.</div>
-        ) : (
-          filteredCats.map((cat) => (
-            <button
-              key={cat.category}
-              className={`tx-edit-cat-item${form.category === cat.category ? ' tx-edit-cat-item--selected' : ''}`}
-              onClick={() => setField('category', cat.category)}
-            >
-              {cat.category}
-            </button>
-          ))
-        )}
-      </div>
+      {/* Row 2: Category — only shown for regular purchases */}
+      {form.transaction_type === 'regular' || form.transaction_type === '' ? (
+        <>
+          <div className="tx-edit-section-title">Category</div>
+          <input
+            className="tx-edit-cat-filter"
+            placeholder="Search categories…"
+            value={catFilter}
+            onChange={(e) => setCatFilter(e.target.value)}
+          />
+          <div className="tx-edit-cat-list">
+            {filteredCats.length === 0 ? (
+              <div className="tx-edit-cat-none">No categories match.</div>
+            ) : (
+              filteredCats.map((cat) => (
+                <button
+                  key={cat.category}
+                  className={`tx-edit-cat-item${form.category === cat.category ? ' tx-edit-cat-item--selected' : ''}`}
+                  onClick={() => setField('category', cat.category)}
+                >
+                  {cat.category}
+                </button>
+              ))
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="tx-edit-type-note">
+          {form.transaction_type === 'income'
+            ? '💰 Income transactions don\'t have a category.'
+            : '↔️ Transfer transactions don\'t have a category.'}
+        </div>
+      )}
 
       {/* Row 3: Outflow | Inflow */}
       <div className="tx-edit-amount-row">

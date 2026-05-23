@@ -395,6 +395,25 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   padding: 12px 16px; border-bottom: 1px solid var(--border);
 }
 .tx-edit-toggle-label { font-size: 14px; }
+/* Transaction type selector (Income / Regular / Transfer) */
+.tx-edit-type-row {
+  display: flex; gap: 8px; padding: 10px 16px;
+  border-bottom: 1px solid var(--border); background: var(--bg);
+}
+.tx-edit-type-pill {
+  flex: 1; padding: 7px 4px; border-radius: 8px; font-size: 13px; font-weight: 600;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary);
+  cursor: pointer; transition: background .12s, color .12s, border-color .12s;
+}
+.tx-edit-type-pill:hover { background: #f0f4ff; color: var(--text); }
+.tx-edit-type-pill--active {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+}
+.tx-edit-type-note {
+  padding: 14px 16px; font-size: 13px; color: var(--text-secondary);
+  border-bottom: 1px solid var(--border); font-style: italic;
+}
+
 /* Two equal columns — used for Payee | Memo */
 .tx-edit-2col {
   display: flex; gap: 0; border-bottom: 1px solid var(--border);
