@@ -6,6 +6,7 @@ import {
   fetchAllCategoryCalcEntries,
   fetchReadyToAssign,
 } from '../api/budget';
+import { normalizeBtsTransactions } from '../api/bts';
 import { db } from './schema';
 
 export interface SyncProgress {
@@ -19,6 +20,11 @@ export interface SyncProgress {
 
 let _listeners: Array<(p: SyncProgress) => void> = [];
 let _current: SyncProgress = { status: 'idle', loaded: 0, total: null };
+
+// Prevents concurrent syncOnOpen calls from racing each other.
+// A second call while one is in flight is a no-op; the caller's
+// version will be picked up on the next poll cycle.
+let _syncInFlight = false;
 
 /** Subscribe to sync progress events. Returns an unsubscribe function. */
 export function onSyncProgress(cb: (p: SyncProgress) => void): () => void {
@@ -54,16 +60,23 @@ export async function syncOnOpen(
   sheetId: string,
   sheetVersion: string
 ): Promise<void> {
+  if (_syncInFlight) return;
+
   const lastSync = await db.syncMeta.get('all');
 
   // Already up to date — nothing to do.
   if (lastSync?.lastSheetVersion === sheetVersion) return;
 
+  _syncInFlight = true;
   const isColdStart = !lastSync;
   notify({ status: isColdStart ? 'cold-start' : 'syncing', loaded: 0, total: null });
 
   try {
     const client = new SheetsClient(sheetId, token);
+
+    // Normalize new BTS rows into Transactions tab before fetching,
+    // so the fetch below picks them up in the same sync cycle.
+    await normalizeBtsTransactions(client);
 
     // Fetch all transactions (including split children for complete cache)
     const transactions = await fetchTransactions(client, { includeSplitChildren: true });
@@ -94,12 +107,15 @@ export async function syncOnOpen(
       lastSheetVersion: sheetVersion,
       rowCount: transactions.length,
       readyToAssign,
+      lastBtsSyncedAt: new Date().toISOString(),
     });
 
     notify({ status: 'complete', loaded: transactions.length, total: transactions.length });
   } catch (e) {
     notify({ status: 'error', loaded: 0, total: null, error: String(e) });
     throw e;
+  } finally {
+    _syncInFlight = false;
   }
 }
 
