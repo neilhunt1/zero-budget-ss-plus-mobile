@@ -135,6 +135,18 @@ export async function appendTransaction(
 }
 
 /**
+ * Append multiple transaction rows in a single API call.
+ * Prefer this over calling appendTransaction() in a loop to avoid rate limits.
+ */
+export async function appendTransactions(
+  client: SheetsClient,
+  txns: Omit<Transaction, '_rowIndex'>[]
+): Promise<void> {
+  if (txns.length === 0) return;
+  await client.appendValues('Transactions!A2', txns.map(serializeRow));
+}
+
+/**
  * Update specific fields of an existing transaction in-place.
  * Uses individual cell writes to avoid overwriting unrelated columns.
  */

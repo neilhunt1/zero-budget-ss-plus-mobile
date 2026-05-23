@@ -1,6 +1,6 @@
 import { SheetsClient } from './client';
 import { Transaction } from '../types';
-import { appendTransaction, updateTransactionFields } from './transactions';
+import { appendTransactions, updateTransactionFields } from './transactions';
 
 const BTS_TAB = 'Transactions (BTS)';
 const TRANSACTIONS_EXT_ID_RANGE = 'Transactions!E2:G'; // external_id(E), status(G)
@@ -132,8 +132,8 @@ export async function normalizeBtsTransactions(
     existing.set(externalId, { rowIndex: i + 2, status }); // +2: 1-based + header row
   }
 
-  let inserted = 0;
   let updated = 0;
+  const toInsert: Omit<Transaction, '_rowIndex'>[] = [];
 
   for (const row of btsRows) {
     const transactionId = row[idxId]?.trim();
@@ -164,11 +164,12 @@ export async function normalizeBtsTransactions(
       continue;
     }
 
-    // New row — normalize and append
-    const tx = normalizeBtsRow(btsRow);
-    await appendTransaction(client, tx);
-    inserted++;
+    toInsert.push(normalizeBtsRow(btsRow));
   }
+
+  // Single batch insert — one API call, one Drive version bump
+  await appendTransactions(client, toInsert);
+  const inserted = toInsert.length;
 
   console.log(`[BTS] done — inserted: ${inserted}, updated: ${updated}, skipped: ${btsRows.length - inserted - updated}`);
   return { inserted, updated };
