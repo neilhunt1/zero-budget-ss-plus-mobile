@@ -165,6 +165,10 @@ vi.mock('../../src/api/client', () => ({
   SheetsClient: vi.fn().mockImplementation(() => ({})),
 }));
 
+vi.mock('../../src/api/bts', () => ({
+  normalizeBtsTransactions: vi.fn().mockResolvedValue({ inserted: 0, updated: 0 }),
+}));
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('IndexedDB sync pipeline @integration', () => {

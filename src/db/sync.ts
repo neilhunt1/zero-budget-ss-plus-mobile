@@ -6,6 +6,7 @@ import {
   fetchAllCategoryCalcEntries,
   fetchReadyToAssign,
 } from '../api/budget';
+import { normalizeBtsTransactions } from '../api/bts';
 import { db } from './schema';
 
 export interface SyncProgress {
@@ -65,6 +66,10 @@ export async function syncOnOpen(
   try {
     const client = new SheetsClient(sheetId, token);
 
+    // Normalize new BTS rows into Transactions tab before fetching,
+    // so the fetch below picks them up in the same sync cycle.
+    await normalizeBtsTransactions(client);
+
     // Fetch all transactions (including split children for complete cache)
     const transactions = await fetchTransactions(client, { includeSplitChildren: true });
     await db.transactions.bulkPut(transactions);
@@ -94,6 +99,7 @@ export async function syncOnOpen(
       lastSheetVersion: sheetVersion,
       rowCount: transactions.length,
       readyToAssign,
+      lastBtsSyncedAt: new Date().toISOString(),
     });
 
     notify({ status: 'complete', loaded: transactions.length, total: transactions.length });

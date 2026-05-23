@@ -59,6 +59,7 @@ const TABS_TO_COPY = [
   'Budget',
   'Templates',
   'Balance History (BTS)',
+  'Transactions (BTS)',
   'YNAB_Plan_Import',
 ];
 
