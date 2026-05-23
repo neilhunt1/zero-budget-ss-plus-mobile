@@ -21,6 +21,11 @@ export interface SyncProgress {
 let _listeners: Array<(p: SyncProgress) => void> = [];
 let _current: SyncProgress = { status: 'idle', loaded: 0, total: null };
 
+// Prevents concurrent syncOnOpen calls from racing each other.
+// A second call while one is in flight is a no-op; the caller's
+// version will be picked up on the next poll cycle.
+let _syncInFlight = false;
+
 /** Subscribe to sync progress events. Returns an unsubscribe function. */
 export function onSyncProgress(cb: (p: SyncProgress) => void): () => void {
   _listeners.push(cb);
@@ -55,11 +60,14 @@ export async function syncOnOpen(
   sheetId: string,
   sheetVersion: string
 ): Promise<void> {
+  if (_syncInFlight) return;
+
   const lastSync = await db.syncMeta.get('all');
 
   // Already up to date — nothing to do.
   if (lastSync?.lastSheetVersion === sheetVersion) return;
 
+  _syncInFlight = true;
   const isColdStart = !lastSync;
   notify({ status: isColdStart ? 'cold-start' : 'syncing', loaded: 0, total: null });
 
@@ -106,6 +114,8 @@ export async function syncOnOpen(
   } catch (e) {
     notify({ status: 'error', loaded: 0, total: null, error: String(e) });
     throw e;
+  } finally {
+    _syncInFlight = false;
   }
 }
 
