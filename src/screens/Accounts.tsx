@@ -516,7 +516,7 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
             <div className="state-msg">No transactions in this view.</div>
           ) : (
             <>
-              {/* Column headers — desktop only (hidden on mobile via CSS grid not applying) */}
+              {/* Column headers — desktop only */}
               {isDesktop && (
                 <div className="tx-list-header tx-desktop-cols" aria-hidden="true">
                   <span>Date</span>
@@ -526,7 +526,9 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
                   <span>Memo</span>
                   <span className="tx-hdr-num">Outflow</span>
                   <span className="tx-hdr-num">Inflow</span>
-                  <span />
+                  <span className="tx-hdr-icon" title="Transaction type">⊕</span>
+                  <span className="tx-hdr-icon" title="Reviewed">✓</span>
+                  <span className="tx-hdr-icon" title="Cleared">C</span>
                 </div>
               )}
               {displayedTransactions.map((tx) => {
@@ -549,7 +551,6 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
                             {tx.parent_id && <span className="tx-split-label"> (split)</span>}
                           </span>
                           <span className={`tx-desktop-cell${!tx.category ? ' tx-desktop-cell--cat-none' : ''}`}>
-                            {tx.reviewed && tx.category && <span className="tx-reviewed-mark" aria-hidden="true">✓ </span>}
                             {tx.category || 'Uncategorized'}
                           </span>
                           <span className="tx-desktop-cell tx-desktop-cell--secondary">{tx.memo}</span>
@@ -559,8 +560,22 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
                           <span className={`tx-desktop-cell tx-desktop-cell--num${tx.inflow > 0 ? ' tx-desktop-cell--inflow' : ''}`}>
                             {tx.inflow > 0 ? fmt(tx.inflow) : ''}
                           </span>
-                          <span className={`tx-desktop-cell tx-desktop-cell--status${tx.status === 'cleared' ? ' cleared' : ''}`}>
-                            {tx.status === 'cleared' ? '✓' : tx.status === 'pending' ? '○' : ''}
+                          {/* Type icon */}
+                          <span className="tx-desktop-cell tx-desktop-cell--icon" title={classifyTransactionType(tx) || 'unknown'}>
+                            {classifyTransactionType(tx) === 'income' ? '💰'
+                              : classifyTransactionType(tx) === 'transfer' ? '↔️'
+                              : classifyTransactionType(tx) === 'regular' ? '🛒'
+                              : ''}
+                          </span>
+                          {/* Reviewed */}
+                          <span className="tx-desktop-cell tx-desktop-cell--icon">
+                            {tx.reviewed && <span className="tx-rev-mark" aria-label="Reviewed">✓</span>}
+                          </span>
+                          {/* Cleared */}
+                          <span className="tx-desktop-cell tx-desktop-cell--icon">
+                            <span className={`tx-clr-icon${tx.status === 'cleared' ? ' tx-clr-icon--cleared' : tx.status === 'pending' ? ' tx-clr-icon--pending' : ''}`}>
+                              {tx.status === 'pending' ? 'P' : 'C'}
+                            </span>
                           </span>
                         </div>
                       </button>

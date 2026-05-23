@@ -603,12 +603,12 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   .plan-group-tab-total.negative { color: var(--negative); }
 
   /* ── Desktop transaction list ─────────────────────────────────────── */
-  /* column order: date | account | payee | category | memo | outflow | inflow | status */
+  /* column order: date | account | payee | category | memo | outflow | inflow | type | rev | clr */
   .tx-desktop-cols {
     display: grid;
-    grid-template-columns: 68px 130px 1fr 0.7fr 0.4fr 82px 82px 28px;
+    grid-template-columns: 68px 130px 1fr 0.7fr 0.4fr 82px 82px 26px 24px 34px;
     align-items: center;
-    gap: 0 12px;
+    gap: 0 10px;
     padding: 0 16px;
   }
   .tx-list-header {
@@ -666,12 +666,35 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   }
   .tx-desktop-cell--outflow { color: var(--negative); }
   .tx-desktop-cell--inflow { color: var(--positive); }
-  .tx-desktop-cell--status {
-    text-align: center;
-    font-size: 12px;
-    color: var(--text-secondary);
+
+  /* Icon columns: Type | Reviewed | Cleared */
+  .tx-desktop-cell--icon {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; overflow: visible;
   }
-  .tx-desktop-cell--status.cleared { color: var(--positive); }
+  /* Reviewed ✓ */
+  .tx-rev-mark {
+    font-size: 13px; font-weight: 700; color: var(--positive);
+    line-height: 1;
+  }
+  /* Cleared: YNAB-style circle with letter C */
+  .tx-clr-icon {
+    width: 20px; height: 20px; border-radius: 50%;
+    border: 2px solid #ccc;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 800; color: #bbb;
+    flex-shrink: 0; line-height: 1;
+  }
+  .tx-clr-icon--cleared {
+    background: var(--positive); border-color: var(--positive); color: #fff;
+  }
+  .tx-clr-icon--pending {
+    border-color: #d4900a; color: #d4900a;
+  }
+  /* Header for icon columns — use small symbol instead of text */
+  .tx-list-header .tx-hdr-icon {
+    text-align: center; font-size: 12px; letter-spacing: 0; text-transform: none;
+  }
 }
 
 /* ── Nav badge ────────────────────────────────────────────────────────────── */
