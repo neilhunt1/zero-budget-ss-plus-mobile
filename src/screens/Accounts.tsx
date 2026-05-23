@@ -15,6 +15,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { SheetsClient } from '../api/client';
 import { optimisticEditTransaction } from '../db/optimisticWrites';
+import { getAccountDisplayName } from '../utils/accountNames';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -33,6 +34,20 @@ export function txRowClass(tx: Transaction): string {
 }
 
 type FilterMode = 'all' | 'unreviewed' | 'pending';
+
+function fmtDate(iso: string): string {
+  // Append time to avoid timezone-shift to previous day
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function txDesktopRowClass(tx: Transaction, selected: boolean): string {
+  const parts = ['tx-row-desktop'];
+  if (tx.status === 'pending') parts.push('tx-row--pending');
+  else if (!tx.reviewed) parts.push('tx-row--unreviewed');
+  if (selected) parts.push('tx-row--selected');
+  return parts.join(' ');
+}
 
 // ─── Editable transaction detail ───────────────────────────────────────────────
 
@@ -437,42 +452,94 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
           {displayedTransactions.length === 0 ? (
             <div className="state-msg">No transactions in this view.</div>
           ) : (
-            displayedTransactions.map((tx) => (
-              <div key={tx.transaction_id}>
-                <button
-                  className={txRowClass(tx)}
-                  onClick={() => setSelectedTx(selectedTx?.transaction_id === tx.transaction_id ? null : tx)}
-                >
-                  <div className="tx-row-main">
-                    <span className="tx-payee">
-                      {tx.payee || tx.description || '(unknown)'}
-                      {tx.parent_id && <span className="tx-split-label"> (split)</span>}
-                    </span>
-                    <span className="tx-meta">
-                      {tx.account} · {tx.status === 'pending' ? '⏳ ' : ''}{tx.date}
-                    </span>
-                    <span className={`tx-category${!tx.category ? ' tx-category--none' : ''}`}>
-                      {tx.reviewed && tx.category && (
-                        <span className="tx-reviewed-mark" aria-hidden="true">✓ </span>
-                      )}
-                      {tx.category || 'Uncategorized'}
-                    </span>
+            <>
+              {/* Column headers — desktop only (hidden on mobile via CSS grid not applying) */}
+              {isDesktop && (
+                <div className="tx-list-header tx-desktop-cols" aria-hidden="true">
+                  <span>Date</span>
+                  <span>Account</span>
+                  <span>Payee</span>
+                  <span>Category</span>
+                  <span>Memo</span>
+                  <span className="tx-hdr-num">Outflow</span>
+                  <span className="tx-hdr-num">Inflow</span>
+                  <span />
+                </div>
+              )}
+              {displayedTransactions.map((tx) => {
+                const isSelected = selectedTx?.transaction_id === tx.transaction_id;
+                const acct = getAccountDisplayName(tx.account);
+                return (
+                  <div key={tx.transaction_id}>
+                    {isDesktop ? (
+                      /* ── Desktop: single condensed grid row ── */
+                      <button
+                        className={txDesktopRowClass(tx, isSelected)}
+                        onClick={() => setSelectedTx(isSelected ? null : tx)}
+                        title={tx.memo || undefined}
+                      >
+                        <div className="tx-desktop-cols">
+                          <span className="tx-desktop-cell tx-desktop-cell--secondary">{fmtDate(tx.date)}</span>
+                          <span className="tx-desktop-cell tx-desktop-cell--secondary" title={tx.account}>{acct}</span>
+                          <span className="tx-desktop-cell tx-desktop-cell--payee">
+                            {tx.payee || tx.description || '(unknown)'}
+                            {tx.parent_id && <span className="tx-split-label"> (split)</span>}
+                          </span>
+                          <span className={`tx-desktop-cell${!tx.category ? ' tx-desktop-cell--cat-none' : ''}`}>
+                            {tx.reviewed && tx.category && <span className="tx-reviewed-mark" aria-hidden="true">✓ </span>}
+                            {tx.category || 'Uncategorized'}
+                          </span>
+                          <span className="tx-desktop-cell tx-desktop-cell--secondary">{tx.memo}</span>
+                          <span className={`tx-desktop-cell tx-desktop-cell--num${tx.outflow > 0 ? ' tx-desktop-cell--outflow' : ''}`}>
+                            {tx.outflow > 0 ? fmt(tx.outflow) : ''}
+                          </span>
+                          <span className={`tx-desktop-cell tx-desktop-cell--num${tx.inflow > 0 ? ' tx-desktop-cell--inflow' : ''}`}>
+                            {tx.inflow > 0 ? fmt(tx.inflow) : ''}
+                          </span>
+                          <span className={`tx-desktop-cell tx-desktop-cell--status${tx.status === 'cleared' ? ' cleared' : ''}`}>
+                            {tx.status === 'cleared' ? '✓' : tx.status === 'pending' ? '○' : ''}
+                          </span>
+                        </div>
+                      </button>
+                    ) : (
+                      /* ── Mobile: original card-style row ── */
+                      <button
+                        className={txRowClass(tx)}
+                        onClick={() => setSelectedTx(isSelected ? null : tx)}
+                      >
+                        <div className="tx-row-main">
+                          <span className="tx-payee">
+                            {tx.payee || tx.description || '(unknown)'}
+                            {tx.parent_id && <span className="tx-split-label"> (split)</span>}
+                          </span>
+                          <span className="tx-meta">
+                            {acct} · {tx.status === 'pending' ? '⏳ ' : ''}{tx.date}
+                          </span>
+                          <span className={`tx-category${!tx.category ? ' tx-category--none' : ''}`}>
+                            {tx.reviewed && tx.category && (
+                              <span className="tx-reviewed-mark" aria-hidden="true">✓ </span>
+                            )}
+                            {tx.category || 'Uncategorized'}
+                          </span>
+                        </div>
+                        <span className={`tx-amount${tx.inflow > 0 ? ' tx-amount--inflow' : ' tx-amount--outflow'}`}>
+                          {tx.inflow > 0 ? `+${fmt(tx.inflow)}` : `-${fmt(tx.outflow)}`}
+                        </span>
+                      </button>
+                    )}
+                    {isSelected && isDesktop && (
+                      <TxDetailEditor
+                        tx={selectedTx!}
+                        categories={categories}
+                        onClose={handleClose}
+                        isDesktop={true}
+                        token={token}
+                      />
+                    )}
                   </div>
-                  <span className={`tx-amount${tx.inflow > 0 ? ' tx-amount--inflow' : ' tx-amount--outflow'}`}>
-                    {tx.inflow > 0 ? `+${fmt(tx.inflow)}` : `-${fmt(tx.outflow)}`}
-                  </span>
-                </button>
-                {selectedTx?.transaction_id === tx.transaction_id && isDesktop && (
-                  <TxDetailEditor
-                    tx={selectedTx}
-                    categories={categories}
-                    onClose={handleClose}
-                    isDesktop={true}
-                    token={token}
-                  />
-                )}
-              </div>
-            ))
+                );
+              })}
+            </>
           )}
         </div>
       )}

@@ -561,6 +561,77 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   .plan-group-tab-name { flex: 1; }
   .plan-group-tab-total { font-size: 12px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
   .plan-group-tab-total.negative { color: var(--negative); }
+
+  /* ── Desktop transaction list ─────────────────────────────────────── */
+  /* column order: date | account | payee | category | memo | outflow | inflow | status */
+  .tx-desktop-cols {
+    display: grid;
+    grid-template-columns: 68px 130px 1fr 0.7fr 0.4fr 82px 82px 28px;
+    align-items: center;
+    gap: 0 12px;
+    padding: 0 16px;
+  }
+  .tx-list-header {
+    border-bottom: 2px solid var(--border);
+    padding-top: 4px;
+    padding-bottom: 6px;
+    background: var(--bg);
+    position: sticky;
+    top: var(--nav-height);
+    z-index: 10;
+  }
+  .tx-list-header span {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    color: var(--text-secondary);
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .tx-list-header .tx-hdr-num { text-align: right; }
+  .tx-row-desktop {
+    min-height: 40px;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+  }
+  .tx-row-desktop:hover { background: #f8faff; }
+  .tx-row-desktop.tx-row--unreviewed { background: #fffbeb; }
+  .tx-row-desktop.tx-row--unreviewed:hover { background: #fff8d6; }
+  .tx-row-desktop.tx-row--pending { opacity: .65; }
+  .tx-row-desktop.tx-row--selected { background: #eef3fb; }
+  .tx-desktop-cell {
+    font-size: 13px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--text);
+  }
+  .tx-desktop-cell--secondary { color: var(--text-secondary); }
+  .tx-desktop-cell--payee { font-weight: 600; }
+  .tx-desktop-cell--cat-none { color: var(--negative); }
+  .tx-desktop-cell--num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+  .tx-desktop-cell--outflow { color: var(--negative); }
+  .tx-desktop-cell--inflow { color: var(--positive); }
+  .tx-desktop-cell--status {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .tx-desktop-cell--status.cleared { color: var(--positive); }
 }
 
 /* ── Nav badge ────────────────────────────────────────────────────────────── */
