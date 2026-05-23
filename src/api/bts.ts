@@ -86,10 +86,15 @@ export async function normalizeBtsTransactions(
   // Read BTS source tab (header row + data rows)
   const btsRes = await client.getValues(`${BTS_TAB}!A1:Z`);
   const btsAllRows = btsRes.values ?? [];
-  if (btsAllRows.length < 2) return { inserted: 0, updated: 0 };
+  console.log('[BTS] rows from sheet (incl header):', btsAllRows.length);
+  if (btsAllRows.length < 2) {
+    console.log('[BTS] no data rows — skipping');
+    return { inserted: 0, updated: 0 };
+  }
 
   // Build header → column index map (BTS controls schema, not positional)
   const headers = btsAllRows[0].map((h) => h.trim());
+  console.log('[BTS] headers:', headers);
   const col = (name: string) => headers.indexOf(name);
 
   const idxId = col('Transaction_id');
@@ -103,7 +108,12 @@ export async function normalizeBtsTransactions(
   const idxAccount = col('Account');
   const idxMemo = col('Memo');
 
-  if (idxId === -1 || idxDate === -1) return { inserted: 0, updated: 0 };
+  console.log('[BTS] column indices — Transaction_id:', idxId, 'Date:', idxDate, 'pending:', idxPending);
+
+  if (idxId === -1 || idxDate === -1) {
+    console.warn('[BTS] required columns not found — check header names in Transactions (BTS) tab');
+    return { inserted: 0, updated: 0 };
+  }
 
   const btsRows = btsAllRows.slice(1);
 
@@ -111,6 +121,7 @@ export async function normalizeBtsTransactions(
   // Columns: E=external_id, F=imported_at, G=status — we read E:G
   const extRes = await client.getValues(TRANSACTIONS_EXT_ID_RANGE);
   const extRows = extRes.values ?? [];
+  console.log('[BTS] existing Transactions rows with external_id:', extRows.filter(r => r[0]?.trim()).length);
 
   // Map: external_id → { rowIndex (1-based sheet row), status }
   const existing = new Map<string, { rowIndex: number; status: string }>();
@@ -159,5 +170,6 @@ export async function normalizeBtsTransactions(
     inserted++;
   }
 
+  console.log(`[BTS] done — inserted: ${inserted}, updated: ${updated}, skipped: ${btsRows.length - inserted - updated}`);
   return { inserted, updated };
 }
