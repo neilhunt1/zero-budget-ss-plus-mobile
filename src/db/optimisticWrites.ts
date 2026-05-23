@@ -29,18 +29,19 @@ export async function optimisticApproveIncome(
 }
 
 /**
- * Confirm a transfer, optionally linking a matching pair transaction.
+ * Confirm a transfer or CC payment, optionally linking a matching pair transaction.
  * Updates IndexedDB immediately, then writes to Sheets.
  * On Sheets failure, reverts both the tx and the pair in IndexedDB.
  */
 export async function optimisticConfirmTransfer(
   tx: Transaction,
   pair: Transaction | null,
-  client: SheetsClient
+  client: SheetsClient,
+  type: TransactionType = 'transfer'
 ): Promise<void> {
   const updates: Partial<Transaction> = {
     reviewed: true,
-    transaction_type: 'transfer' as TransactionType,
+    transaction_type: type,
     ...(pair ? { transfer_pair_id: pair.transaction_id } : {}),
   };
   await db.transactions.update(tx.transaction_id, updates);

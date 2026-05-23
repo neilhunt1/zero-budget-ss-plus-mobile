@@ -1,7 +1,7 @@
 // ─── Enums / Literals ─────────────────────────────────────────────────────────
 
 export type TransactionStatus = 'cleared' | 'pending' | 'manual';
-export type TransactionType = 'income' | 'transfer' | 'regular';
+export type TransactionType = 'income' | 'transfer' | 'credit_payment' | 'regular';
 export type CategoryType = 'fluid' | 'fixed_bill' | 'savings_target';
 
 // ─── Core Domain Types ─────────────────────────────────────────────────────────

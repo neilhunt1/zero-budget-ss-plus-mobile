@@ -30,3 +30,16 @@ for (const account of accountsConfig.accounts) {
 export function getAccountDisplayName(raw: string): string {
   return aliasMap.get(raw.toLowerCase()) ?? raw;
 }
+
+const CREDIT_PATTERNS = /credit\s*card|visa|mastercard|amex|american\s*express|discover/i;
+
+/**
+ * Returns 'credit' or 'depository' based on the account name.
+ * Checks both the raw name and any mapped display name.
+ * Used to detect credit_payment pairs (outflow from depository + inflow to credit).
+ */
+export function getAccountType(raw: string): 'credit' | 'depository' {
+  const display = getAccountDisplayName(raw);
+  if (CREDIT_PATTERNS.test(raw) || CREDIT_PATTERNS.test(display)) return 'credit';
+  return 'depository';
+}

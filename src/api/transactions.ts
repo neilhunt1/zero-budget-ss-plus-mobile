@@ -1,5 +1,6 @@
 import { SheetsClient, colIndexToLetter } from './client';
 import { Transaction, TransactionStatus, TransactionType, CategoryType } from '../types';
+import { getAccountType } from '../utils/accountNames';
 
 // Column order must match scripts/setup-sheet.ts TRANSACTIONS_COLUMNS exactly.
 const COLS = [
@@ -166,24 +167,22 @@ export async function updateTransactionFields(
 
 /**
  * Derive the semantic transaction type from a transaction's fields.
- * Handles both new-style values ('income'|'transfer'|'regular') and legacy
- * values ('debit'|'credit'|'transfer') that may exist in older sheet data.
+ * Handles both new-style values ('income'|'transfer'|'credit_payment'|'regular')
+ * and legacy values ('debit'|'credit') that may exist in older sheet data.
  */
 export function classifyTransactionType(tx: Transaction): TransactionType | '' {
-  if (['income', 'transfer', 'regular'].includes(tx.transaction_type)) {
+  if (['income', 'transfer', 'credit_payment', 'regular'].includes(tx.transaction_type)) {
     return tx.transaction_type as TransactionType;
   }
   // Legacy mappings
   if ((tx.transaction_type as string) === 'debit') return 'regular';
-  // 'credit_payment' was an old enum value before it was merged into 'transfer'
-  if (tx.transaction_type === 'transfer' || (tx.transaction_type as string) === 'credit_payment') return 'transfer';
   if ((tx.transaction_type as string) === 'credit') {
     return tx.inflow > 0 && !tx.category ? 'income' : 'regular';
   }
-  // Blank — infer from data
-  if (tx.inflow > 0 && !tx.category) return 'income';
+  // Blank — infer from structural signals only (avoid false income classification)
   if (tx.transfer_pair_id) return 'transfer';
   if (tx.outflow > 0 || (tx.inflow > 0 && tx.category)) return 'regular';
+  // Uncategorized inflow with no pair — leave unclassified so triage handles it
   return '';
 }
 
@@ -209,6 +208,33 @@ export function findTransferPair(
 }
 
 /**
+ * Scan a list of transactions for a matching CC payment leg.
+ * Requires one account to be a credit card and the other depository, within ±3 days, ±$0.01.
+ * The two legs flow in opposite directions (outflow from checking, inflow to CC — or vice versa).
+ */
+export function findCcPaymentPair(
+  tx: Transaction,
+  allTxns: Transaction[]
+): Transaction | null {
+  const txType = getAccountType(tx.account);
+  const amount = tx.outflow || tx.inflow;
+  const txTime = new Date(tx.date).getTime();
+  return (
+    allTxns.find((other) => {
+      if (other.transaction_id === tx.transaction_id || other.account === tx.account) return false;
+      const otherType = getAccountType(other.account);
+      // Must be credit ↔ depository
+      if (!((txType === 'credit' && otherType === 'depository') ||
+            (txType === 'depository' && otherType === 'credit'))) return false;
+      const otherAmount = other.outflow || other.inflow;
+      if (Math.abs(otherAmount - amount) > 0.01) return false;
+      const daysDiff = Math.abs(new Date(other.date).getTime() - txTime) / 86_400_000;
+      return daysDiff <= 3;
+    }) ?? null
+  );
+}
+
+/**
  * Compute per-category activity (outflow − inflow) for a set of transactions.
  * Transfers and income are excluded — they have no budget category impact.
  */
@@ -217,7 +243,7 @@ export function computeCategoryActivity(
 ): Map<string, number> {
   const map = new Map<string, number>();
   for (const tx of transactions) {
-    if (!tx.category || tx.transaction_type === 'transfer' || tx.transaction_type === 'income') continue;
+    if (!tx.category || tx.transaction_type === 'transfer' || tx.transaction_type === 'credit_payment' || tx.transaction_type === 'income') continue;
     map.set(tx.category, (map.get(tx.category) ?? 0) + tx.outflow - tx.inflow);
   }
   return map;

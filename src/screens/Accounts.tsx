@@ -81,9 +81,10 @@ function initForm(tx: Transaction): FormState {
 }
 
 const TX_TYPES: { value: TransactionType; label: string }[] = [
-  { value: 'income',   label: '💰 Income'   },
-  { value: 'regular',  label: '🛒 Regular'  },
-  { value: 'transfer', label: '↔️ Transfer' },
+  { value: 'income',         label: '💰 Income'      },
+  { value: 'regular',        label: '🛒 Regular'     },
+  { value: 'transfer',       label: '↔️ Transfer'    },
+  { value: 'credit_payment', label: '💳 CC Payment'  },
 ];
 
 function buildDiff(
@@ -246,6 +247,8 @@ function TxDetailEditor({
         <div className="tx-edit-type-note">
           {form.transaction_type === 'income'
             ? '💰 Income transactions don\'t have a category.'
+            : form.transaction_type === 'credit_payment'
+            ? '💳 CC Payment transactions don\'t have a category.'
             : '↔️ Transfer transactions don\'t have a category.'}
         </div>
       )}
@@ -374,6 +377,7 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<ActiveFilter | null>(null);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
+  const [expandedPairIds, setExpandedPairIds] = useState<Set<string>>(new Set());
 
   // Debounce rawQuery → debouncedQuery (150ms)
   useEffect(() => {
@@ -426,6 +430,44 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
     if (filter === 'pending') txns = txns.filter((t) => t.status === 'pending');
     return txns;
   }, [filteredBySearch, filter]);
+
+  // Collapse transfer/cc-payment pairs into a single primary row.
+  // Primary = the outflow leg (or the first encountered when both are inflow-only).
+  const { visibleRows, pairMap } = useMemo(() => {
+    const byId = new Map(displayedTransactions.map((t) => [t.transaction_id, t]));
+    const suppressed = new Set<string>();
+    const pairMap = new Map<string, Transaction>(); // primary_id → secondary tx
+    const visibleRows: Transaction[] = [];
+
+    for (const tx of displayedTransactions) {
+      if (suppressed.has(tx.transaction_id)) continue;
+      const pairTx = tx.transfer_pair_id ? byId.get(tx.transfer_pair_id) : undefined;
+      if (pairTx && !suppressed.has(pairTx.transaction_id)) {
+        // Prefer the outflow leg as primary
+        const [primary, secondary] = tx.outflow >= pairTx.outflow ? [tx, pairTx] : [pairTx, tx];
+        suppressed.add(secondary.transaction_id);
+        pairMap.set(primary.transaction_id, secondary);
+        visibleRows.push(primary);
+      } else {
+        visibleRows.push(tx);
+      }
+    }
+    return { visibleRows, pairMap };
+  }, [displayedTransactions]);
+
+  // Transactions classified as transfer/cc_payment, reviewed, older than 7 days, no pair.
+  const unmatchedTransferCount = useMemo(() => {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 7);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    return (filteredBySearch ?? []).filter(
+      (t) =>
+        (t.transaction_type === 'transfer' || t.transaction_type === 'credit_payment') &&
+        t.reviewed &&
+        !t.transfer_pair_id &&
+        t.date < cutoffStr
+    ).length;
+  }, [filteredBySearch]);
 
   function handleSelectCategory(cat: string) {
     setActiveFilter({ type: 'category', value: cat });
@@ -508,11 +550,17 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
 
       <div className="tx-list-scope">{scopeHint()}</div>
 
+      {unmatchedTransferCount > 0 && (
+        <div className="unmatched-transfer-warning">
+          ⚠️ {unmatchedTransferCount} transfer{unmatchedTransferCount !== 1 ? 's' : ''} older than 7 days have no matching pair
+        </div>
+      )}
+
       {loading && <div className="state-msg">Loading…</div>}
 
       {!loading && (
         <div className="tx-list">
-          {displayedTransactions.length === 0 ? (
+          {visibleRows.length === 0 ? (
             <div className="state-msg">No transactions in this view.</div>
           ) : (
             <>
@@ -531,79 +579,136 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
                   <span className="tx-hdr-icon" title="Cleared">C</span>
                 </div>
               )}
-              {displayedTransactions.map((tx) => {
+              {visibleRows.map((tx) => {
                 const isSelected = selectedTx?.transaction_id === tx.transaction_id;
                 const acct = getAccountDisplayName(tx.account);
+                const txType = classifyTransactionType(tx);
+                const typeIcon = txType === 'income' ? '💰'
+                  : txType === 'transfer' ? '↔️'
+                  : txType === 'credit_payment' ? '💳'
+                  : txType === 'regular' ? '🛒'
+                  : '';
+                const pairTx = pairMap.get(tx.transaction_id);
+                const isExpanded = expandedPairIds.has(tx.transaction_id);
+
+                function togglePair() {
+                  setExpandedPairIds((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(tx.transaction_id)) next.delete(tx.transaction_id);
+                    else next.add(tx.transaction_id);
+                    return next;
+                  });
+                }
+
                 return (
                   <div key={tx.transaction_id}>
                     {isDesktop ? (
                       /* ── Desktop: single condensed grid row ── */
-                      <button
-                        className={txDesktopRowClass(tx, isSelected)}
-                        onClick={() => setSelectedTx(isSelected ? null : tx)}
-                        title={tx.memo || undefined}
-                      >
-                        <div className="tx-desktop-cols">
-                          <span className="tx-desktop-cell tx-desktop-cell--secondary">{fmtDate(tx.date)}</span>
-                          <span className="tx-desktop-cell tx-desktop-cell--secondary" title={tx.account}>{acct}</span>
-                          <span className="tx-desktop-cell tx-desktop-cell--payee">
-                            {tx.payee || tx.description || '(unknown)'}
-                            {tx.parent_id && <span className="tx-split-label"> (split)</span>}
-                          </span>
-                          <span className={`tx-desktop-cell${!tx.category ? ' tx-desktop-cell--cat-none' : ''}`}>
-                            {tx.category || 'Uncategorized'}
-                          </span>
-                          <span className="tx-desktop-cell tx-desktop-cell--secondary">{tx.memo}</span>
-                          <span className={`tx-desktop-cell tx-desktop-cell--num${tx.outflow > 0 ? ' tx-desktop-cell--outflow' : ''}`}>
-                            {tx.outflow > 0 ? fmt(tx.outflow) : ''}
-                          </span>
-                          <span className={`tx-desktop-cell tx-desktop-cell--num${tx.inflow > 0 ? ' tx-desktop-cell--inflow' : ''}`}>
-                            {tx.inflow > 0 ? fmt(tx.inflow) : ''}
-                          </span>
-                          {/* Type icon */}
-                          <span className="tx-desktop-cell tx-desktop-cell--icon" title={classifyTransactionType(tx) || 'unknown'}>
-                            {classifyTransactionType(tx) === 'income' ? '💰'
-                              : classifyTransactionType(tx) === 'transfer' ? '↔️'
-                              : classifyTransactionType(tx) === 'regular' ? '🛒'
-                              : ''}
-                          </span>
-                          {/* Reviewed */}
-                          <span className="tx-desktop-cell tx-desktop-cell--icon">
-                            {tx.reviewed && <span className="tx-rev-mark" aria-label="Reviewed">✓</span>}
-                          </span>
-                          {/* Cleared */}
-                          <span className="tx-desktop-cell tx-desktop-cell--icon">
-                            <span className={`tx-clr-icon${tx.status === 'cleared' ? ' tx-clr-icon--cleared' : tx.status === 'pending' ? ' tx-clr-icon--pending' : ''}`}>
-                              {tx.status === 'pending' ? 'P' : 'C'}
+                      <>
+                        <button
+                          className={txDesktopRowClass(tx, isSelected)}
+                          onClick={() => setSelectedTx(isSelected ? null : tx)}
+                          title={tx.memo || undefined}
+                        >
+                          <div className="tx-desktop-cols">
+                            <span className="tx-desktop-cell tx-desktop-cell--secondary">{fmtDate(tx.date)}</span>
+                            <span className="tx-desktop-cell tx-desktop-cell--secondary" title={tx.account}>{acct}</span>
+                            <span className="tx-desktop-cell tx-desktop-cell--payee">
+                              {tx.payee || tx.description || '(unknown)'}
+                              {tx.parent_id && <span className="tx-split-label"> (split)</span>}
+                              {pairTx && (
+                                <span className="tx-pair-label"> → {getAccountDisplayName(pairTx.account)}</span>
+                              )}
                             </span>
-                          </span>
-                        </div>
-                      </button>
+                            <span className={`tx-desktop-cell${!tx.category ? ' tx-desktop-cell--cat-none' : ''}`}>
+                              {tx.category || 'Uncategorized'}
+                            </span>
+                            <span className="tx-desktop-cell tx-desktop-cell--secondary">{tx.memo}</span>
+                            <span className={`tx-desktop-cell tx-desktop-cell--num${tx.outflow > 0 ? ' tx-desktop-cell--outflow' : ''}`}>
+                              {tx.outflow > 0 ? fmt(tx.outflow) : ''}
+                            </span>
+                            <span className={`tx-desktop-cell tx-desktop-cell--num${tx.inflow > 0 ? ' tx-desktop-cell--inflow' : ''}`}>
+                              {tx.inflow > 0 ? fmt(tx.inflow) : ''}
+                            </span>
+                            <span className="tx-desktop-cell tx-desktop-cell--icon" title={txType || 'unknown'}>
+                              {typeIcon}
+                            </span>
+                            <span className="tx-desktop-cell tx-desktop-cell--icon">
+                              {tx.reviewed && <span className="tx-rev-mark" aria-label="Reviewed">✓</span>}
+                            </span>
+                            <span className="tx-desktop-cell tx-desktop-cell--icon">
+                              <span className={`tx-clr-icon${tx.status === 'cleared' ? ' tx-clr-icon--cleared' : tx.status === 'pending' ? ' tx-clr-icon--pending' : ''}`}>
+                                {tx.status === 'pending' ? 'P' : 'C'}
+                              </span>
+                            </span>
+                          </div>
+                        </button>
+                        {pairTx && (
+                          <button className="tx-pair-toggle" onClick={togglePair} aria-label={isExpanded ? 'Collapse pair' : 'Expand pair'}>
+                            {isExpanded ? '▲ Hide pair leg' : '▼ Show pair leg'}
+                          </button>
+                        )}
+                        {pairTx && isExpanded && (
+                          <div className="tx-pair-row tx-desktop-cols">
+                            <span className="tx-desktop-cell tx-desktop-cell--secondary">{fmtDate(pairTx.date)}</span>
+                            <span className="tx-desktop-cell tx-desktop-cell--secondary">{getAccountDisplayName(pairTx.account)}</span>
+                            <span className="tx-desktop-cell tx-desktop-cell--payee tx-desktop-cell--secondary">{pairTx.payee || pairTx.description || '(unknown)'}</span>
+                            <span className="tx-desktop-cell tx-desktop-cell--secondary">{pairTx.category}</span>
+                            <span className="tx-desktop-cell tx-desktop-cell--secondary">{pairTx.memo}</span>
+                            <span className={`tx-desktop-cell tx-desktop-cell--num${pairTx.outflow > 0 ? ' tx-desktop-cell--outflow' : ''}`}>
+                              {pairTx.outflow > 0 ? fmt(pairTx.outflow) : ''}
+                            </span>
+                            <span className={`tx-desktop-cell tx-desktop-cell--num${pairTx.inflow > 0 ? ' tx-desktop-cell--inflow' : ''}`}>
+                              {pairTx.inflow > 0 ? fmt(pairTx.inflow) : ''}
+                            </span>
+                            <span className="tx-desktop-cell" />
+                            <span className="tx-desktop-cell" />
+                            <span className="tx-desktop-cell" />
+                          </div>
+                        )}
+                      </>
                     ) : (
-                      /* ── Mobile: original card-style row ── */
-                      <button
-                        className={txRowClass(tx)}
-                        onClick={() => setSelectedTx(isSelected ? null : tx)}
-                      >
-                        <div className="tx-row-main">
-                          <span className="tx-payee">
-                            {tx.payee || tx.description || '(unknown)'}
-                            {tx.parent_id && <span className="tx-split-label"> (split)</span>}
+                      /* ── Mobile: card-style row ── */
+                      <>
+                        <button
+                          className={txRowClass(tx)}
+                          onClick={() => setSelectedTx(isSelected ? null : tx)}
+                        >
+                          <div className="tx-row-main">
+                            <span className="tx-payee">
+                              {typeIcon && <span className="tx-type-icon">{typeIcon} </span>}
+                              {tx.payee || tx.description || '(unknown)'}
+                              {tx.parent_id && <span className="tx-split-label"> (split)</span>}
+                              {pairTx && <span className="tx-pair-label"> → {getAccountDisplayName(pairTx.account)}</span>}
+                            </span>
+                            <span className="tx-meta">
+                              {acct} · {tx.status === 'pending' ? '⏳ ' : ''}{tx.date}
+                            </span>
+                            <span className={`tx-category${!tx.category ? ' tx-category--none' : ''}`}>
+                              {tx.reviewed && tx.category && (
+                                <span className="tx-reviewed-mark" aria-hidden="true">✓ </span>
+                              )}
+                              {tx.category || 'Uncategorized'}
+                            </span>
+                          </div>
+                          <span className={`tx-amount${tx.inflow > 0 ? ' tx-amount--inflow' : ' tx-amount--outflow'}`}>
+                            {tx.inflow > 0 ? `+${fmt(tx.inflow)}` : `-${fmt(tx.outflow)}`}
                           </span>
-                          <span className="tx-meta">
-                            {acct} · {tx.status === 'pending' ? '⏳ ' : ''}{tx.date}
-                          </span>
-                          <span className={`tx-category${!tx.category ? ' tx-category--none' : ''}`}>
-                            {tx.reviewed && tx.category && (
-                              <span className="tx-reviewed-mark" aria-hidden="true">✓ </span>
-                            )}
-                            {tx.category || 'Uncategorized'}
-                          </span>
-                        </div>
-                        <span className={`tx-amount${tx.inflow > 0 ? ' tx-amount--inflow' : ' tx-amount--outflow'}`}>
-                          {tx.inflow > 0 ? `+${fmt(tx.inflow)}` : `-${fmt(tx.outflow)}`}
-                        </span>
-                      </button>
+                        </button>
+                        {pairTx && (
+                          <button className="tx-pair-toggle" onClick={togglePair}>
+                            {isExpanded ? '▲ Hide pair leg' : `▼ ${getAccountDisplayName(pairTx.account)}`}
+                          </button>
+                        )}
+                        {pairTx && isExpanded && (
+                          <div className="tx-pair-row">
+                            <span className="tx-payee tx-desktop-cell--secondary">{getAccountDisplayName(pairTx.account)}</span>
+                            <span className={`tx-amount${pairTx.inflow > 0 ? ' tx-amount--inflow' : ' tx-amount--outflow'}`}>
+                              {pairTx.inflow > 0 ? `+${fmt(pairTx.inflow)}` : `-${fmt(pairTx.outflow)}`}
+                            </span>
+                          </div>
+                        )}
+                      </>
                     )}
                     {isSelected && isDesktop && (
                       <TxDetailEditor

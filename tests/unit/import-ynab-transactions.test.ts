@@ -18,6 +18,7 @@ import {
   resolveCategory,
   parseCsvLine,
   parseCsv,
+  detectYnabTransactionType,
   type YnabCsvRow,
   type ExistingTransactionSummary,
 } from '../../scripts/import-ynab-transactions';
@@ -631,5 +632,53 @@ describe('shortHash', () => {
 
   it('changes when inputs change', () => {
     expect(shortHash('a', 'b')).not.toBe(shortHash('b', 'a'));
+  });
+});
+
+// ─── detectYnabTransactionType ────────────────────────────────────────────────
+
+function makeYnabRow(overrides: Partial<YnabCsvRow> = {}): YnabCsvRow {
+  return {
+    account: 'CapitalOne Checking',
+    flag: '',
+    rawDate: '05/01/2026',
+    date: '2026-05-01',
+    payee: 'Amazon',
+    categoryGroupCategory: 'Living: Household',
+    categoryGroup: 'Living',
+    category: 'Household',
+    memo: '',
+    rawOutflow: '$50.00',
+    rawInflow: '$0.00',
+    outflow: 50,
+    inflow: 0,
+    cleared: 'Cleared',
+    ...overrides,
+  };
+}
+
+describe('detectYnabTransactionType', () => {
+  it('returns income for Inflow category group', () => {
+    const row = makeYnabRow({ categoryGroup: 'Inflow', category: 'Ready to Assign', inflow: 5000, outflow: 0 });
+    expect(detectYnabTransactionType(row)).toBe('income');
+  });
+
+  it('returns transfer for payee starting with "Transfer:"', () => {
+    const row = makeYnabRow({ payee: 'Transfer: Savings', categoryGroup: 'Transfer', outflow: 1000 });
+    expect(detectYnabTransactionType(row)).toBe('transfer');
+  });
+
+  it('returns regular for a normal purchase', () => {
+    expect(detectYnabTransactionType(makeYnabRow())).toBe('regular');
+  });
+
+  it('returns regular for a store return (inflow from spending payee)', () => {
+    const row = makeYnabRow({ payee: 'Amazon', inflow: 25, outflow: 0, categoryGroup: 'Living' });
+    expect(detectYnabTransactionType(row)).toBe('regular');
+  });
+
+  it('Inflow group takes priority over Transfer payee (edge case)', () => {
+    const row = makeYnabRow({ categoryGroup: 'Inflow', payee: 'Transfer: Checking' });
+    expect(detectYnabTransactionType(row)).toBe('income');
   });
 });
