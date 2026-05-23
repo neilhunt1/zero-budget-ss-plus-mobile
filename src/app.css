@@ -368,6 +368,69 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .detail-label { font-size: 13px; color: var(--text-secondary); flex-shrink: 0; }
 .detail-value { font-size: 14px; font-weight: 500; text-align: right; word-break: break-word; margin-left: 12px; }
 
+/* ── Transaction editor (mobile bottom-sheet fields + desktop inline) ─────── */
+.tx-edit-section-title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--text-secondary); padding: 12px 16px 6px; font-weight: 600;
+}
+.tx-edit-field {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 16px; border-bottom: 1px solid var(--border);
+}
+.tx-edit-label { font-size: 12px; color: var(--text-secondary); }
+.tx-edit-input {
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; font-size: 14px; background: var(--bg); color: var(--text);
+  width: 100%; font-family: inherit;
+}
+.tx-edit-input:focus { border-color: var(--accent); outline: none; }
+.tx-edit-select {
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; font-size: 14px; background: var(--bg); color: var(--text);
+  width: 100%; font-family: inherit; appearance: none;
+}
+.tx-edit-select:focus { border-color: var(--accent); outline: none; }
+.tx-edit-toggle-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+}
+.tx-edit-toggle-label { font-size: 14px; }
+.tx-edit-amount-row {
+  display: flex; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--border);
+}
+.tx-edit-amount-row .tx-edit-field { flex: 1; padding: 0; border-bottom: none; }
+.tx-edit-cat-filter {
+  margin: 8px 16px; border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; font-size: 14px; background: var(--bg); color: var(--text);
+  width: calc(100% - 32px); font-family: inherit;
+}
+.tx-edit-cat-filter:focus { border-color: var(--accent); outline: none; }
+.tx-edit-cat-list { max-height: 200px; overflow-y: auto; }
+.tx-edit-cat-item {
+  display: flex; align-items: center; padding: 11px 16px;
+  border-bottom: 1px solid var(--border); background: var(--surface);
+  width: 100%; text-align: left; font: inherit; cursor: pointer;
+  border-left: none; border-right: none; border-top: none;
+}
+.tx-edit-cat-item:hover { background: #f8faff; }
+.tx-edit-cat-item--selected { background: #eef3fb; color: var(--accent); font-weight: 600; }
+.tx-edit-cat-none { padding: 12px 16px; font-size: 13px; color: var(--text-secondary); }
+.tx-edit-actions {
+  display: flex; gap: 12px; padding: 16px;
+}
+.tx-edit-actions > button { flex: 1; }
+.tx-edit-error {
+  margin: 0 16px 8px; font-size: 13px; color: var(--negative); text-align: center;
+}
+
+/* Desktop: inline expansion below the tapped row */
+.tx-edit-inline {
+  background: var(--surface);
+  border-bottom: 2px solid var(--accent);
+}
+.tx-edit-inline .tx-edit-actions { justify-content: flex-end; }
+.tx-edit-inline .tx-edit-actions > button { flex: unset; }
+
 /* ── Reflect screen ───────────────────────────────────────────────────────── */
 .reflect-stats {
   display: grid; grid-template-columns: 1fr 1fr; gap: 1px;

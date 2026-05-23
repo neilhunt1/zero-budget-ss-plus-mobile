@@ -8,12 +8,18 @@ import {
   getTransactionsByAccount,
   getTransactionsByPayee,
 } from '../db/queries';
+import { db } from '../db/schema';
 import SearchBar, { type ActiveFilter } from '../components/SearchBar';
-import { Transaction } from '../types';
+import { Transaction, BudgetCategory, TransactionStatus } from '../types';
+import { useAuth } from '../hooks/useAuth';
+import { useMediaQuery } from '../hooks/useMediaQuery';
+import { SheetsClient } from '../api/client';
+import { optimisticEditTransaction } from '../db/optimisticWrites';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const RECENT_DAYS = 90;
+const SHEET_ID = import.meta.env.VITE_GOOGLE_SHEET_ID as string;
 
 function fmt(n: number): string {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 });
@@ -28,47 +34,246 @@ export function txRowClass(tx: Transaction): string {
 
 type FilterMode = 'all' | 'unreviewed' | 'pending';
 
-// ─── Transaction detail bottom sheet ──────────────────────────────────────────
+// ─── Editable transaction detail ───────────────────────────────────────────────
 
-function DetailRow({ label, value }: { label: string; value: string | undefined }) {
-  if (!value) return null;
-  return (
-    <div className="detail-row">
-      <span className="detail-label">{label}</span>
-      <span className="detail-value">{value}</span>
-    </div>
-  );
+type FormState = {
+  payee: string;
+  category: string;
+  memo: string;
+  outflow: string;
+  inflow: string;
+  date: string;
+  account: string;
+  status: TransactionStatus;
+  reviewed: boolean;
+};
+
+function initForm(tx: Transaction): FormState {
+  return {
+    payee: tx.payee,
+    category: tx.category,
+    memo: tx.memo,
+    outflow: tx.outflow > 0 ? String(tx.outflow) : '',
+    inflow: tx.inflow > 0 ? String(tx.inflow) : '',
+    date: tx.date,
+    account: tx.account,
+    status: tx.status,
+    reviewed: tx.reviewed,
+  };
 }
 
-function TxDetailSheet({ tx, onClose }: { tx: Transaction; onClose: () => void }) {
-  const isInflow = tx.inflow > 0;
-  const amount = isInflow ? fmt(tx.inflow) : fmt(tx.outflow);
-  const amountDisplay = `${isInflow ? '+' : '-'}${amount}`;
+function buildDiff(
+  tx: Transaction,
+  form: FormState,
+  catRecord: BudgetCategory | undefined
+): Partial<Transaction> {
+  const changes: Partial<Transaction> = {};
+  if (form.payee !== tx.payee) changes.payee = form.payee;
+  if (form.category !== tx.category) {
+    changes.category = form.category;
+    changes.category_group = catRecord?.category_group ?? '';
+    changes.category_type = catRecord?.category_type ?? '';
+  }
+  if (form.memo !== tx.memo) changes.memo = form.memo;
+  const outflow = parseFloat(form.outflow) || 0;
+  const inflow = parseFloat(form.inflow) || 0;
+  if (outflow !== tx.outflow) changes.outflow = outflow;
+  if (inflow !== tx.inflow) changes.inflow = inflow;
+  if (form.date !== tx.date) changes.date = form.date;
+  if (form.account !== tx.account) changes.account = form.account;
+  if (form.status !== tx.status) changes.status = form.status;
+  if (form.reviewed !== tx.reviewed) changes.reviewed = form.reviewed;
+  return changes;
+}
+
+function TxDetailEditor({
+  tx,
+  categories,
+  onClose,
+  isDesktop,
+  token,
+}: {
+  tx: Transaction;
+  categories: BudgetCategory[];
+  onClose: () => void;
+  isDesktop: boolean;
+  token: string | null;
+}) {
+  const [form, setForm] = useState<FormState>(() => initForm(tx));
+  const [catFilter, setCatFilter] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Re-init form if a different transaction is opened
+  useEffect(() => {
+    setForm(initForm(tx));
+    setCatFilter('');
+    setError(null);
+  }, [tx.transaction_id]);
+
+  const filteredCats = useMemo(() => {
+    if (!catFilter) return categories;
+    const q = catFilter.toLowerCase();
+    return categories.filter((c) => c.category.toLowerCase().includes(q));
+  }, [categories, catFilter]);
+
+  function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
+    setForm((f) => ({ ...f, [key]: value }));
+    setError(null);
+  }
+
+  async function handleSave() {
+    if (!token) return;
+    const catRecord = categories.find((c) => c.category === form.category);
+    const changes = buildDiff(tx, form, catRecord);
+    if (!Object.keys(changes).length) { onClose(); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      await optimisticEditTransaction(tx, changes, new SheetsClient(SHEET_ID, token));
+      onClose();
+    } catch {
+      setError('Save failed. Check your connection and try again.');
+      setSaving(false);
+    }
+  }
+
+  const formContent = (
+    <>
+      <div className="tx-edit-field">
+        <label className="tx-edit-label">Payee</label>
+        <input
+          className="tx-edit-input"
+          value={form.payee}
+          onChange={(e) => setField('payee', e.target.value)}
+        />
+      </div>
+      <div className="tx-edit-section-title">Category</div>
+      <input
+        className="tx-edit-cat-filter"
+        placeholder="Search categories…"
+        value={catFilter}
+        onChange={(e) => setCatFilter(e.target.value)}
+      />
+      <div className="tx-edit-cat-list">
+        {filteredCats.length === 0 ? (
+          <div className="tx-edit-cat-none">No categories match.</div>
+        ) : (
+          filteredCats.map((cat) => (
+            <button
+              key={cat.category}
+              className={`tx-edit-cat-item${form.category === cat.category ? ' tx-edit-cat-item--selected' : ''}`}
+              onClick={() => setField('category', cat.category)}
+            >
+              {cat.category}
+            </button>
+          ))
+        )}
+      </div>
+      <div className="tx-edit-section-title">Details</div>
+      <div className="tx-edit-field">
+        <label className="tx-edit-label">Memo</label>
+        <input
+          className="tx-edit-input"
+          value={form.memo}
+          onChange={(e) => setField('memo', e.target.value)}
+        />
+      </div>
+      <div className="tx-edit-amount-row">
+        <div className="tx-edit-field">
+          <label className="tx-edit-label">Outflow</label>
+          <input
+            className="tx-edit-input"
+            type="number"
+            min="0"
+            step="0.01"
+            value={form.outflow}
+            onChange={(e) => {
+              const val = e.target.value;
+              setForm((f) => ({ ...f, outflow: val, ...(parseFloat(val) > 0 ? { inflow: '' } : {}) }));
+              setError(null);
+            }}
+          />
+        </div>
+        <div className="tx-edit-field">
+          <label className="tx-edit-label">Inflow</label>
+          <input
+            className="tx-edit-input"
+            type="number"
+            min="0"
+            step="0.01"
+            value={form.inflow}
+            onChange={(e) => {
+              const val = e.target.value;
+              setForm((f) => ({ ...f, inflow: val, ...(parseFloat(val) > 0 ? { outflow: '' } : {}) }));
+              setError(null);
+            }}
+          />
+        </div>
+      </div>
+      <div className="tx-edit-field">
+        <label className="tx-edit-label">Date</label>
+        <input
+          className="tx-edit-input"
+          type="date"
+          value={form.date}
+          onChange={(e) => setField('date', e.target.value)}
+        />
+      </div>
+      <div className="tx-edit-field">
+        <label className="tx-edit-label">Account</label>
+        <input
+          className="tx-edit-input"
+          value={form.account}
+          onChange={(e) => setField('account', e.target.value)}
+        />
+      </div>
+      <div className="tx-edit-field">
+        <label className="tx-edit-label">Status</label>
+        <select
+          className="tx-edit-select"
+          value={form.status}
+          onChange={(e) => setField('status', e.target.value as TransactionStatus)}
+        >
+          <option value="cleared">Cleared</option>
+          <option value="pending">Pending</option>
+          <option value="manual">Manual</option>
+        </select>
+      </div>
+      <div className="tx-edit-toggle-row">
+        <span className="tx-edit-toggle-label">Reviewed</span>
+        <input
+          type="checkbox"
+          checked={form.reviewed}
+          onChange={(e) => setField('reviewed', e.target.checked)}
+        />
+      </div>
+      {error && <div className="tx-edit-error">{error}</div>}
+      <div className="tx-edit-actions">
+        <button className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
+        <button className="btn-primary" onClick={handleSave} disabled={saving}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+    </>
+  );
+
+  if (isDesktop) {
+    return <div className="tx-edit-inline">{formContent}</div>;
+  }
 
   return (
     <div className="assign-overlay" onClick={onClose}>
       <div className="assign-sheet tx-detail-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="assign-sheet-handle" />
         <div className="tx-detail-hero">
-          <span className={`tx-detail-amount${isInflow ? ' tx-amount--inflow' : ' tx-amount--outflow'}`}>
-            {amountDisplay}
+          <span className={`tx-detail-amount${tx.inflow > 0 ? ' tx-amount--inflow' : ' tx-amount--outflow'}`}>
+            {tx.inflow > 0 ? `+${fmt(tx.inflow)}` : `-${fmt(tx.outflow)}`}
           </span>
           <span className="tx-detail-payee">{tx.payee || tx.description || '(unknown payee)'}</span>
           <span className="tx-detail-date">{tx.date}</span>
         </div>
-        <div className="detail-section">
-          <DetailRow label="Account" value={tx.account} />
-          <DetailRow label="Category" value={tx.category || 'Uncategorized'} />
-          <DetailRow label="Category Group" value={tx.category_group} />
-          <DetailRow label="Status" value={tx.status} />
-          <DetailRow label="Reviewed" value={tx.reviewed ? 'Yes' : 'No'} />
-          <DetailRow label="Type" value={tx.transaction_type} />
-          <DetailRow label="Source" value={tx.source} />
-          <DetailRow label="Memo" value={tx.memo} />
-          {tx.needs_reimbursement && <DetailRow label="Needs Reimbursement" value="Yes" />}
-          <DetailRow label="Transaction ID" value={tx.transaction_id} />
-        </div>
-        <button className="picker-cancel" onClick={onClose}>Close</button>
+        {formContent}
       </div>
     </div>
   );
@@ -84,6 +289,8 @@ const FILTERS: { key: FilterMode; label: string }[] = [
 
 export default function Accounts({ unreviewedCount }: { unreviewedCount: number | null }) {
   const navigate = useNavigate();
+  const { token } = useAuth();
+  const isDesktop = useMediaQuery('(min-width: 768px)');
   const [filter, setFilter] = useState<FilterMode>('all');
   const [rawQuery, setRawQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -112,6 +319,11 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
     },
     [activeFilter, debouncedQuery]
   );
+
+  const categories = useLiveQuery(
+    () => db.budgetCategories.filter((c) => c.active).sortBy('sort_order'),
+    []
+  ) ?? [];
 
   // For category filter + text narrowing: client-side filter since getTransactionsByCategory returns all
   const filteredBySearch = useMemo(() => {
@@ -177,6 +389,8 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
     return `Last ${RECENT_DAYS} days · search to see all history`;
   }
 
+  const handleClose = () => setSelectedTx(null);
+
   return (
     <div className="screen transactions-screen">
       <header className="screen-header">
@@ -224,37 +438,53 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
             <div className="state-msg">No transactions in this view.</div>
           ) : (
             displayedTransactions.map((tx) => (
-              <button
-                key={tx.transaction_id}
-                className={txRowClass(tx)}
-                onClick={() => setSelectedTx(tx)}
-              >
-                <div className="tx-row-main">
-                  <span className="tx-payee">
-                    {tx.payee || tx.description || '(unknown)'}
-                    {tx.parent_id && <span className="tx-split-label"> (split)</span>}
+              <div key={tx.transaction_id}>
+                <button
+                  className={txRowClass(tx)}
+                  onClick={() => setSelectedTx(selectedTx?.transaction_id === tx.transaction_id ? null : tx)}
+                >
+                  <div className="tx-row-main">
+                    <span className="tx-payee">
+                      {tx.payee || tx.description || '(unknown)'}
+                      {tx.parent_id && <span className="tx-split-label"> (split)</span>}
+                    </span>
+                    <span className="tx-meta">
+                      {tx.account} · {tx.status === 'pending' ? '⏳ ' : ''}{tx.date}
+                    </span>
+                    <span className={`tx-category${!tx.category ? ' tx-category--none' : ''}`}>
+                      {tx.reviewed && tx.category && (
+                        <span className="tx-reviewed-mark" aria-hidden="true">✓ </span>
+                      )}
+                      {tx.category || 'Uncategorized'}
+                    </span>
+                  </div>
+                  <span className={`tx-amount${tx.inflow > 0 ? ' tx-amount--inflow' : ' tx-amount--outflow'}`}>
+                    {tx.inflow > 0 ? `+${fmt(tx.inflow)}` : `-${fmt(tx.outflow)}`}
                   </span>
-                  <span className="tx-meta">
-                    {tx.account} · {tx.status === 'pending' ? '⏳ ' : ''}{tx.date}
-                  </span>
-                  <span className={`tx-category${!tx.category ? ' tx-category--none' : ''}`}>
-                    {tx.reviewed && tx.category && (
-                      <span className="tx-reviewed-mark" aria-hidden="true">✓ </span>
-                    )}
-                    {tx.category || 'Uncategorized'}
-                  </span>
-                </div>
-                <span className={`tx-amount${tx.inflow > 0 ? ' tx-amount--inflow' : ' tx-amount--outflow'}`}>
-                  {tx.inflow > 0 ? `+${fmt(tx.inflow)}` : `-${fmt(tx.outflow)}`}
-                </span>
-              </button>
+                </button>
+                {selectedTx?.transaction_id === tx.transaction_id && isDesktop && (
+                  <TxDetailEditor
+                    tx={selectedTx}
+                    categories={categories}
+                    onClose={handleClose}
+                    isDesktop={true}
+                    token={token}
+                  />
+                )}
+              </div>
             ))
           )}
         </div>
       )}
 
-      {selectedTx && (
-        <TxDetailSheet tx={selectedTx} onClose={() => setSelectedTx(null)} />
+      {selectedTx && !isDesktop && (
+        <TxDetailEditor
+          tx={selectedTx}
+          categories={categories}
+          onClose={handleClose}
+          isDesktop={false}
+          token={token}
+        />
       )}
     </div>
   );

@@ -9,6 +9,30 @@ vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
 }));
 
+vi.mock('../../src/hooks/useAuth', () => ({
+  useAuth: () => ({ token: 'fake-token' }),
+}));
+
+vi.mock('../../src/hooks/useMediaQuery', () => ({
+  useMediaQuery: () => false, // treat as mobile in all component tests
+}));
+
+vi.mock('../../src/db/schema', () => ({
+  db: {
+    budgetCategories: {
+      filter: (_fn: unknown) => ({ sortBy: (_key: unknown) => Promise.resolve([]) }),
+    },
+  },
+}));
+
+vi.mock('../../src/api/client', () => ({
+  SheetsClient: vi.fn(),
+}));
+
+vi.mock('../../src/db/optimisticWrites', () => ({
+  optimisticEditTransaction: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('dexie-react-hooks', async () => {
   const { useState, useEffect } = await import('react');
   return {
@@ -438,7 +462,7 @@ describe('Transactions screen — detail bottom sheet', () => {
     const row = await screen.findByRole('button', { name: /Coffee Shop/i });
     fireEvent.click(row);
 
-    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
 
   it('bottom sheet shows transaction details', async () => {
@@ -456,7 +480,7 @@ describe('Transactions screen — detail bottom sheet', () => {
     expect(document.querySelector('.tx-detail-amount')?.textContent).toBe('-$85.00');
   });
 
-  it('closes bottom sheet when Close is clicked', async () => {
+  it('closes bottom sheet when Cancel is clicked', async () => {
     mockGetRecentTransactions.mockResolvedValue([
       makeTx({ transaction_id: 'tx3', payee: 'Gym' }),
     ]);
@@ -464,10 +488,10 @@ describe('Transactions screen — detail bottom sheet', () => {
     render(<Accounts unreviewedCount={null} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /Gym/i }));
-    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
   });
 
   it('closes bottom sheet when backdrop overlay is clicked', async () => {
@@ -478,10 +502,10 @@ describe('Transactions screen — detail bottom sheet', () => {
     render(<Accounts unreviewedCount={null} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /Target/i }));
-    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
 
     fireEvent.click(document.querySelector('.assign-overlay')!);
-    expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
   });
 });
 
