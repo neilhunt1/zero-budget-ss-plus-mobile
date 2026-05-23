@@ -165,9 +165,9 @@ describe('findCcPaymentPair', () => {
     expect(findCcPaymentPair(payment, [payment, receipt])).toBe(receipt);
   });
 
-  it('does not match when gap exceeds 3 days', () => {
+  it('does not match when gap exceeds 7 days', () => {
     const payment = makeCcTx({ transaction_id: 'p1', account: 'Capital One 360 Checking (6650)', outflow: 200, date: '2025-05-01' });
-    const receipt = makeCcTx({ transaction_id: 'p2', account: 'Chase CREDIT CARD (2898)', inflow: 200, date: '2025-05-05' });
+    const receipt = makeCcTx({ transaction_id: 'p2', account: 'Chase CREDIT CARD (2898)', inflow: 200, date: '2025-05-09' });
     expect(findCcPaymentPair(payment, [payment, receipt])).toBeNull();
   });
 

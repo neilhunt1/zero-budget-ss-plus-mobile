@@ -209,8 +209,8 @@ export function findTransferPair(
 
 /**
  * Scan a list of transactions for a matching CC payment leg.
- * Requires one account to be a credit card and the other depository, within ±3 days, ±$0.01.
- * The two legs flow in opposite directions (outflow from checking, inflow to CC — or vice versa).
+ * Requires one account to be a credit card and the other depository, within ±7 days, ±$0.01.
+ * Window matches findTransferPair — CC payments can post to the two accounts several days apart.
  */
 export function findCcPaymentPair(
   tx: Transaction,
@@ -229,7 +229,7 @@ export function findCcPaymentPair(
       const otherAmount = other.outflow || other.inflow;
       if (Math.abs(otherAmount - amount) > 0.01) return false;
       const daysDiff = Math.abs(new Date(other.date).getTime() - txTime) / 86_400_000;
-      return daysDiff <= 3;
+      return daysDiff <= 7;
     }) ?? null
   );
 }

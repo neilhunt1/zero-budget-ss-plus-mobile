@@ -14,8 +14,8 @@ import { Transaction, BudgetCategory, TransactionStatus, TransactionType } from 
 import { useAuth } from '../hooks/useAuth';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { SheetsClient } from '../api/client';
-import { optimisticEditTransaction } from '../db/optimisticWrites';
-import { classifyTransactionType } from '../api/transactions';
+import { optimisticEditTransaction, optimisticConfirmTransfer } from '../db/optimisticWrites';
+import { classifyTransactionType, findTransferPair, findCcPaymentPair } from '../api/transactions';
 import { getAccountDisplayName } from '../utils/accountNames';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -140,11 +140,18 @@ function TxDetailEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Pair-finder state (for orphaned transfer/cc_payment transactions)
+  const allTxns = useLiveQuery(() => db.transactions.toArray(), []) ?? [];
+  const [pairCandidate, setPairCandidate] = useState<Transaction | null | 'not_found'>(null);
+  const [linkingPair, setLinkingPair] = useState(false);
+
   // Re-init form if a different transaction is opened
   useEffect(() => {
     setForm(initForm(tx));
     setCatFilter('');
     setError(null);
+    setPairCandidate(null);
+    setLinkingPair(false);
   }, [tx.transaction_id]);
 
   const filteredCats = useMemo(() => {
@@ -171,6 +178,37 @@ function TxDetailEditor({
     } catch {
       setError('Save failed. Check your connection and try again.');
       setSaving(false);
+    }
+  }
+
+  // Pair-finder: shown when type is transfer/cc_payment and no pair is linked yet
+  const showPairFinder =
+    (form.transaction_type === 'transfer' || form.transaction_type === 'credit_payment') &&
+    !tx.transfer_pair_id;
+
+  function handleFindPair() {
+    const found =
+      form.transaction_type === 'credit_payment'
+        ? findCcPaymentPair(tx, allTxns)
+        : findTransferPair(tx, allTxns);
+    setPairCandidate(found ?? 'not_found');
+  }
+
+  async function handleLinkPair() {
+    if (!token || !pairCandidate || pairCandidate === 'not_found') return;
+    setLinkingPair(true);
+    setError(null);
+    try {
+      await optimisticConfirmTransfer(
+        tx,
+        pairCandidate,
+        new SheetsClient(SHEET_ID, token),
+        form.transaction_type as TransactionType
+      );
+      onClose();
+    } catch {
+      setError('Link failed. Check your connection and try again.');
+      setLinkingPair(false);
     }
   }
 
@@ -244,13 +282,41 @@ function TxDetailEditor({
           </div>
         </>
       ) : (
-        <div className="tx-edit-type-note">
-          {form.transaction_type === 'income'
-            ? '💰 Income transactions don\'t have a category.'
-            : form.transaction_type === 'credit_payment'
-            ? '💳 CC Payment transactions don\'t have a category.'
-            : '↔️ Transfer transactions don\'t have a category.'}
-        </div>
+        <>
+          <div className="tx-edit-type-note">
+            {form.transaction_type === 'income'
+              ? '💰 Income transactions don\'t have a category.'
+              : form.transaction_type === 'credit_payment'
+              ? '💳 CC Payment transactions don\'t have a category.'
+              : '↔️ Transfer transactions don\'t have a category.'}
+          </div>
+
+          {/* Pair finder — only for unlinked transfer / cc_payment */}
+          {showPairFinder && (
+            <div className="tx-edit-pair-finder">
+              {tx.transfer_pair_id ? null : pairCandidate === null ? (
+                <button className="btn btn-secondary" onClick={handleFindPair}>
+                  🔍 Find matching pair
+                </button>
+              ) : pairCandidate === 'not_found' ? (
+                <div className="tx-edit-pair-result tx-edit-pair-result--none">
+                  No matching pair found
+                  <button className="btn btn-ghost" onClick={handleFindPair}>Try again</button>
+                </div>
+              ) : (
+                <div className="tx-edit-pair-result tx-edit-pair-result--found">
+                  <span className="tx-edit-pair-label">
+                    Found: {getAccountDisplayName(pairCandidate.account)} · {pairCandidate.date}
+                    · {pairCandidate.outflow > 0 ? `-${fmt(pairCandidate.outflow)}` : `+${fmt(pairCandidate.inflow)}`}
+                  </span>
+                  <button className="btn btn-primary" onClick={handleLinkPair} disabled={linkingPair}>
+                    {linkingPair ? 'Linking…' : 'Link them'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {/* Row 3: Outflow | Inflow */}

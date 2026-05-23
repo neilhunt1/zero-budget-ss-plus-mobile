@@ -22,6 +22,9 @@ vi.mock('../../src/db/schema', () => ({
     budgetCategories: {
       filter: (_fn: unknown) => ({ sortBy: (_key: unknown) => Promise.resolve([]) }),
     },
+    transactions: {
+      toArray: () => Promise.resolve([]),
+    },
   },
 }));
 
@@ -31,6 +34,7 @@ vi.mock('../../src/api/client', () => ({
 
 vi.mock('../../src/db/optimisticWrites', () => ({
   optimisticEditTransaction: vi.fn().mockResolvedValue(undefined),
+  optimisticConfirmTransfer: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('dexie-react-hooks', async () => {
