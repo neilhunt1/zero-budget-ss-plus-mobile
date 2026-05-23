@@ -83,8 +83,16 @@ export function normalizeBtsRow(row: BtsRow): Omit<Transaction, '_rowIndex'> {
 export async function normalizeBtsTransactions(
   client: SheetsClient
 ): Promise<{ inserted: number; updated: number }> {
-  // Read BTS source tab (header row + data rows)
-  const btsRes = await client.getValues(`${BTS_TAB}!A1:Z`);
+  // Read BTS source tab (header row + data rows).
+  // If the tab doesn't exist yet, skip normalization gracefully so the rest
+  // of the sync (Transactions tab, categories, etc.) can still proceed.
+  let btsRes: { values?: string[][] };
+  try {
+    btsRes = await client.getValues(`${BTS_TAB}!A1:Z`);
+  } catch (e) {
+    console.warn('[BTS] Could not read BTS tab — skipping normalization:', e);
+    return { inserted: 0, updated: 0 };
+  }
   const btsAllRows = btsRes.values ?? [];
   console.log('[BTS] rows from sheet (incl header):', btsAllRows.length);
   if (btsAllRows.length < 2) {

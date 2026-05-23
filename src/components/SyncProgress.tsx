@@ -6,6 +6,14 @@ export default function SyncProgress() {
 
   useEffect(() => onSyncProgress(setProgress), []);
 
+  if (progress.status === 'error') {
+    return (
+      <div className="sync-error-banner">
+        Sync failed — check your connection
+      </div>
+    );
+  }
+
   if (progress.status !== 'cold-start') return null;
 
   return (
