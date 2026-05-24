@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { createContext, useContext, useState, ReactNode } from 'react';
 import { useGoogleLogin, googleLogout } from '@react-oauth/google';
 
 const TOKEN_KEY = 'zb_access_token';
@@ -29,14 +29,19 @@ export interface AuthState {
   signOut: () => void;
 }
 
+// ─── Context ──────────────────────────────────────────────────────────────────
+
+const AuthContext = createContext<AuthState | null>(null);
+
 /**
- * Manages Google OAuth token state.
- * Persists the access token in localStorage so it survives page refreshes
- * within the token's lifetime (~1 hour).
+ * Provides a single shared auth state to the entire app.
+ * Must be rendered inside <GoogleOAuthProvider> so that useGoogleLogin works.
  *
- * Must be used inside <GoogleOAuthProvider>.
+ * Previously, every component that called useAuth() got its own useState,
+ * so a login triggered in AuthGate didn't update the token in App.tsx and
+ * the NavBar stayed hidden until a page refresh.
  */
-export function useAuth(): AuthState {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(getStoredToken);
 
   const login = useGoogleLogin({
@@ -59,5 +64,22 @@ export function useAuth(): AuthState {
     setToken(null);
   };
 
-  return { token, isAuthenticated: !!token, login, signOut };
+  return (
+    <AuthContext.Provider value={{ token, isAuthenticated: !!token, login, signOut }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns the shared auth state.
+ * All callers share the same token — updating it in one place (e.g. AuthGate)
+ * immediately reflects everywhere (e.g. App.tsx → NavBar).
+ */
+export function useAuth(): AuthState {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used inside <AuthProvider>');
+  return ctx;
 }

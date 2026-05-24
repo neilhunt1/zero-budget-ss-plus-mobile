@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { useAuth } from './hooks/useAuth';
+import { useAuth, AuthProvider } from './hooks/useAuth';
 import { useSheetSync } from './hooks/useSheetSync';
 import { useUnreviewedCount } from './hooks/useUnreviewedCount';
 import { useAppBadge } from './hooks/useAppBadge';
@@ -28,6 +28,7 @@ export default function App() {
 
   return (
     <HashRouter>
+      <AuthProvider>
       <div className="app">
         {isAuthenticated && <AppBadge onCount={handleCount} />}
         <SyncProgress />
@@ -71,6 +72,7 @@ export default function App() {
           </Routes>
         </main>
       </div>
+      </AuthProvider>
     </HashRouter>
   );
 }
