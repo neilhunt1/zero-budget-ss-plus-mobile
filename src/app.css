@@ -544,8 +544,11 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   .nav-item.active { background: #eef3fb; }
   .nav-signout { margin-left: auto; padding: 8px 0; }
 
-  /* Main content: top padding for top nav, no bottom padding */
-  .main-content { padding-bottom: 0; padding-top: var(--nav-height); }
+  /* Main content: margin (not padding) to clear fixed top nav.
+     Using margin-top rather than padding-top ensures sticky children calculate
+     their threshold from the scroll container's visible top edge (y=56px on screen)
+     rather than having padding double-counted by some browsers. */
+  .main-content { padding-bottom: 0; padding-top: 0; margin-top: var(--nav-height); }
 
   /* Screen titles are redundant — top nav already shows where you are */
   .screen-title { display: none; }
@@ -617,7 +620,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
     padding-bottom: 6px;
     background: var(--bg);
     position: sticky;
-    top: var(--nav-height);
+    top: 0;
     z-index: 10;
   }
   .tx-list-header span {
