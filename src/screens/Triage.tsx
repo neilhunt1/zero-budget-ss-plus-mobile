@@ -69,6 +69,7 @@ function IncomeCard({
       {escapeOpen && (
         <div className="triage-type-selector">
           <button className="triage-type-pill" onClick={() => onTypeOverride('transfer')}>↔️ Transfer</button>
+          <button className="triage-type-pill" onClick={() => onTypeOverride('credit_payment')}>💳 CC Payment</button>
           <button className="triage-type-pill" onClick={() => onTypeOverride('regular')}>🛒 Purchase</button>
         </div>
       )}
@@ -248,6 +249,7 @@ function PurchaseCard({
         <div className="triage-type-selector">
           <button className="triage-type-pill" onClick={() => onTypeOverride('income')}>💰 Income</button>
           <button className="triage-type-pill" onClick={() => onTypeOverride('transfer')}>↔️ Transfer</button>
+          <button className="triage-type-pill" onClick={() => onTypeOverride('credit_payment')}>💳 CC Payment</button>
         </div>
       )}
     </div>
