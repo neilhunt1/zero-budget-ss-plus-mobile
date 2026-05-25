@@ -14,6 +14,9 @@ export default function NavBar({ unreviewedCount }: { unreviewedCount: number | 
         </NavLink>
         <NavLink to="/accounts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
           Transactions
+        </NavLink>
+        <NavLink to="/triage" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
+          Triage
           {badge && <span className="nav-badge">{badge}</span>}
         </NavLink>
         <NavLink to="/reflect" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>

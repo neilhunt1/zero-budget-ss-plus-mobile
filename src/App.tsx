@@ -48,7 +48,7 @@ function AppInner() {
             path="/accounts"
             element={
               <AuthGate>
-                <Accounts unreviewedCount={unreviewedCount} />
+                <Accounts />
               </AuthGate>
             }
           />

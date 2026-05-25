@@ -7,6 +7,7 @@ import type { Transaction } from '../../src/types';
 
 vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
+  useLocation: () => ({ state: null }),
 }));
 
 vi.mock('../../src/hooks/useAuth', () => ({
@@ -149,7 +150,7 @@ describe('Transactions screen — rendering', () => {
   it('shows loading state while data is undefined', async () => {
     mockGetRecentTransactions.mockReturnValue(new Promise(() => {})); // never resolves — stays undefined
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
     expect(screen.getByText('Loading…')).toBeInTheDocument();
   });
 
@@ -159,7 +160,7 @@ describe('Transactions screen — rendering', () => {
       makeTx({ transaction_id: 'tx2', payee: 'Netflix' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     await waitFor(() => {
       expect(screen.getByText('Whole Foods')).toBeInTheDocument();
@@ -167,21 +168,9 @@ describe('Transactions screen — rendering', () => {
     });
   });
 
-  it('shows triage banner when unreviewedCount > 0', async () => {
-    const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={3} />);
-    expect(screen.getByText(/3 transactions need categories/i)).toBeInTheDocument();
-  });
-
-  it('hides triage banner when unreviewedCount is 0', async () => {
-    const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={0} />);
-    expect(screen.queryByText(/need categories/i)).not.toBeInTheDocument();
-  });
-
   it('shows All, Unreviewed, and Pending filter chips', async () => {
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
     expect(screen.getByRole('button', { name: 'All' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Unreviewed' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Pending' })).toBeInTheDocument();
@@ -189,14 +178,29 @@ describe('Transactions screen — rendering', () => {
 
   it('shows a search input', async () => {
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
     expect(screen.getByPlaceholderText(/search payee/i)).toBeInTheDocument();
   });
 
   it('shows scope hint with default range when no search', async () => {
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
     expect(screen.getByText(/last 90 days/i)).toBeInTheDocument();
+  });
+
+  it('opens detail for transaction passed via router state highlightId', async () => {
+    const tx = makeTx({ transaction_id: 'tx-highlight', payee: 'Highlight Co' });
+    mockGetRecentTransactions.mockResolvedValue([tx]);
+    vi.doMock('react-router-dom', () => ({
+      useNavigate: () => vi.fn(),
+      useLocation: () => ({ state: { highlightId: 'tx-highlight' } }),
+    }));
+    const { default: Accounts } = await import('../../src/screens/Accounts');
+    render(<Accounts />);
+    // The detail editor opens, showing the payee in the edit form
+    await waitFor(() => {
+      expect(screen.getAllByText('Highlight Co').length).toBeGreaterThan(1);
+    });
   });
 });
 
@@ -212,7 +216,7 @@ describe('Transactions screen — filter chips', () => {
       makeTx({ transaction_id: 'unrev', payee: 'Unreviewed Co', reviewed: false }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Unreviewed' }));
 
@@ -228,7 +232,7 @@ describe('Transactions screen — filter chips', () => {
       makeTx({ transaction_id: 'pnd', payee: 'Pending Co', status: 'pending' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Pending' }));
 
@@ -244,7 +248,7 @@ describe('Transactions screen — filter chips', () => {
       makeTx({ transaction_id: 'u', payee: 'Netflix', reviewed: false }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Unreviewed' }));
     await waitFor(() => expect(screen.queryByText('Amazon')).not.toBeInTheDocument());
@@ -278,7 +282,7 @@ describe('Transactions screen — search', () => {
       makeTx({ transaction_id: 'a', payee: 'Amazon Prime' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     fireEvent.change(screen.getByPlaceholderText(/search payee/i), { target: { value: 'amazon' } });
 
@@ -294,7 +298,7 @@ describe('Transactions screen — search', () => {
       makeTx({ transaction_id: 'found', payee: 'BGE Electric' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     await waitFor(() => expect(screen.getByText('Recent Payee')).toBeInTheDocument());
 
@@ -314,7 +318,7 @@ describe('Transactions screen — search', () => {
       makeTx({ transaction_id: 's', payee: 'BGE Electric' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     fireEvent.change(screen.getByPlaceholderText(/search payee/i), { target: { value: 'BGE' } });
     await waitFor(() => expect(screen.getByText('BGE Electric')).toBeInTheDocument());
@@ -330,7 +334,7 @@ describe('Transactions screen — search', () => {
       makeTx({ transaction_id: 'h2', payee: 'BGE Gas' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     fireEvent.change(screen.getByPlaceholderText(/search payee/i), { target: { value: 'BGE' } });
 
@@ -339,7 +343,7 @@ describe('Transactions screen — search', () => {
 
   it('shows "Last 90 days" hint when not searching', async () => {
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
     expect(screen.getByText(/last 90 days/i)).toBeInTheDocument();
   });
 });
@@ -355,7 +359,7 @@ describe('Transactions screen — visual treatment', () => {
       makeTx({ transaction_id: 'u', payee: 'Unknown Shop', reviewed: false, status: 'cleared' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     await waitFor(() => {
       expect(document.querySelector('.tx-row--unreviewed')).toBeInTheDocument();
@@ -367,7 +371,7 @@ describe('Transactions screen — visual treatment', () => {
       makeTx({ transaction_id: 'p', payee: 'Pending Store', status: 'pending' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     await waitFor(() => {
       expect(document.querySelector('.tx-row--pending')).toBeInTheDocument();
@@ -379,7 +383,7 @@ describe('Transactions screen — visual treatment', () => {
       makeTx({ transaction_id: 'rv', reviewed: true, category: 'Groceries', status: 'cleared' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     await waitFor(() => {
       expect(document.querySelector('.tx-reviewed-mark')).toBeInTheDocument();
@@ -391,7 +395,7 @@ describe('Transactions screen — visual treatment', () => {
       makeTx({ transaction_id: 'unrv', reviewed: false, category: 'Groceries' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     await waitFor(() => {
       expect(screen.getByText('Groceries')).toBeInTheDocument();
@@ -404,7 +408,7 @@ describe('Transactions screen — visual treatment', () => {
       makeTx({ transaction_id: 'pd', payee: 'Bank Pending', status: 'pending', date: '2026-05-10' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     await waitFor(() => {
       const meta = document.querySelector('.tx-meta');
@@ -417,7 +421,7 @@ describe('Transactions screen — visual treatment', () => {
       makeTx({ transaction_id: 'nc', payee: 'Mystery Store', category: '' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     await waitFor(() => {
       expect(document.querySelector('.tx-category--none')).toBeInTheDocument();
@@ -430,7 +434,7 @@ describe('Transactions screen — visual treatment', () => {
       makeTx({ transaction_id: 'out', outflow: 42.5, inflow: 0 }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     await waitFor(() => {
       expect(document.querySelector('.tx-amount--outflow')?.textContent).toBe('-$42.50');
@@ -442,7 +446,7 @@ describe('Transactions screen — visual treatment', () => {
       makeTx({ transaction_id: 'in', outflow: 0, inflow: 1500 }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     await waitFor(() => {
       expect(document.querySelector('.tx-amount--inflow')?.textContent).toBe('+$1,500.00');
@@ -461,7 +465,7 @@ describe('Transactions screen — detail bottom sheet', () => {
       makeTx({ transaction_id: 'tx1', payee: 'Coffee Shop', category: 'Dining Out' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     const row = await screen.findByRole('button', { name: /Coffee Shop/i });
     fireEvent.click(row);
@@ -474,7 +478,7 @@ describe('Transactions screen — detail bottom sheet', () => {
       makeTx({ transaction_id: 'tx2', payee: 'Trader Joes', category: 'Groceries', outflow: 85, inflow: 0 }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     const row = await screen.findByRole('button', { name: /Trader Joes/i });
     fireEvent.click(row);
@@ -489,7 +493,7 @@ describe('Transactions screen — detail bottom sheet', () => {
       makeTx({ transaction_id: 'tx3', payee: 'Gym' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     fireEvent.click(await screen.findByRole('button', { name: /Gym/i }));
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
@@ -503,7 +507,7 @@ describe('Transactions screen — detail bottom sheet', () => {
       makeTx({ transaction_id: 'tx4', payee: 'Target' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     fireEvent.click(await screen.findByRole('button', { name: /Target/i }));
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
@@ -533,7 +537,7 @@ describe('Transactions screen — type-ahead search', () => {
       makeTx({ transaction_id: 'child', payee: 'EUMC Laurel', parent_id: 'parent' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     await waitFor(() => {
       expect(screen.getByText('EUMC Laurel')).toBeInTheDocument();
@@ -550,7 +554,7 @@ describe('Transactions screen — type-ahead search', () => {
     mockGetAccountSuggestions.mockResolvedValue([]);
 
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     // Simulate selecting a category suggestion by typing enough to trigger suggestions
     // then clicking the suggestion button (which calls onSelectCategory)
@@ -570,7 +574,7 @@ describe('Transactions screen — type-ahead search', () => {
       makeTx({ transaction_id: 's', payee: 'BGE Electric' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
-    render(<Accounts unreviewedCount={null} />);
+    render(<Accounts />);
 
     fireEvent.change(screen.getByPlaceholderText(/search payee/i), { target: { value: 'BGE' } });
     await waitFor(() => expect(screen.getByText('BGE Electric')).toBeInTheDocument());
