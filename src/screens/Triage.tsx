@@ -40,12 +40,14 @@ function IncomeCard({
   tx,
   onApprove,
   onTypeOverride,
+  onViewInList,
   escapeOpen,
   onToggleEscape,
 }: {
   tx: Transaction;
   onApprove: () => void;
   onTypeOverride: (type: TransactionType) => void;
+  onViewInList: () => void;
   escapeOpen: boolean;
   onToggleEscape: () => void;
 }) {
@@ -58,6 +60,7 @@ function IncomeCard({
         <span>{tx.account}</span>
         <span>{tx.date}</span>
       </div>
+      <button className="triage-view-in-list" onClick={onViewInList}>View in list →</button>
       <div className="triage-actions">
         <button className="btn btn-primary" onClick={onApprove}>
           Approve
@@ -82,6 +85,7 @@ function TransferCard({
   pair,
   onConfirm,
   onTypeOverride,
+  onViewInList,
   escapeOpen,
   onToggleEscape,
 }: {
@@ -89,6 +93,7 @@ function TransferCard({
   pair: Transaction | null;
   onConfirm: () => void;
   onTypeOverride: (type: TransactionType) => void;
+  onViewInList: () => void;
   escapeOpen: boolean;
   onToggleEscape: () => void;
 }) {
@@ -104,6 +109,7 @@ function TransferCard({
       {pair && (
         <div className="triage-pair-match">Matched with {pair.account}</div>
       )}
+      <button className="triage-view-in-list" onClick={onViewInList}>View in list →</button>
       <div className="triage-actions">
         <button className="btn btn-primary" onClick={onConfirm}>
           Confirm
@@ -128,6 +134,7 @@ function CcPaymentCard({
   pair,
   onConfirm,
   onTypeOverride,
+  onViewInList,
   escapeOpen,
   onToggleEscape,
 }: {
@@ -135,6 +142,7 @@ function CcPaymentCard({
   pair: Transaction | null;
   onConfirm: () => void;
   onTypeOverride: (type: TransactionType) => void;
+  onViewInList: () => void;
   escapeOpen: boolean;
   onToggleEscape: () => void;
 }) {
@@ -150,6 +158,7 @@ function CcPaymentCard({
       {pair && (
         <div className="triage-pair-match">Matched with {pair.account}</div>
       )}
+      <button className="triage-view-in-list" onClick={onViewInList}>View in list →</button>
       <div className="triage-actions">
         <button className="btn btn-primary" onClick={onConfirm}>
           Confirm
@@ -177,6 +186,7 @@ function PurchaseCard({
   onSelectCategory,
   onAssign,
   onTypeOverride,
+  onViewInList,
   escapeOpen,
   onToggleEscape,
 }: {
@@ -187,6 +197,7 @@ function PurchaseCard({
   onSelectCategory: (cat: string) => void;
   onAssign: () => void;
   onTypeOverride: (type: TransactionType) => void;
+  onViewInList: () => void;
   escapeOpen: boolean;
   onToggleEscape: () => void;
 }) {
@@ -203,6 +214,7 @@ function PurchaseCard({
         <span>{tx.account}</span>
         <span>{tx.date}</span>
       </div>
+      <button className="triage-view-in-list" onClick={onViewInList}>View in list →</button>
 
       <div className="triage-category-list">
         <button
@@ -428,6 +440,7 @@ export default function Triage() {
             tx={tx}
             onApprove={handleApproveIncome}
             onTypeOverride={handleTypeOverride}
+            onViewInList={() => navigate('/accounts', { state: { highlightId: tx.transaction_id } })}
             escapeOpen={escapeOpen}
             onToggleEscape={() => setEscapeOpen((o) => !o)}
           />
@@ -438,6 +451,7 @@ export default function Triage() {
             pair={pair}
             onConfirm={handleConfirmTransfer}
             onTypeOverride={handleTypeOverride}
+            onViewInList={() => navigate('/accounts', { state: { highlightId: tx.transaction_id } })}
             escapeOpen={escapeOpen}
             onToggleEscape={() => setEscapeOpen((o) => !o)}
           />
@@ -448,6 +462,7 @@ export default function Triage() {
             pair={pair}
             onConfirm={handleConfirmCcPayment}
             onTypeOverride={handleTypeOverride}
+            onViewInList={() => navigate('/accounts', { state: { highlightId: tx.transaction_id } })}
             escapeOpen={escapeOpen}
             onToggleEscape={() => setEscapeOpen((o) => !o)}
           />
@@ -461,6 +476,7 @@ export default function Triage() {
             onSelectCategory={setSelectedCategory}
             onAssign={handleAssignPurchase}
             onTypeOverride={handleTypeOverride}
+            onViewInList={() => navigate('/accounts', { state: { highlightId: tx.transaction_id } })}
             escapeOpen={escapeOpen}
             onToggleEscape={() => setEscapeOpen((o) => !o)}
           />

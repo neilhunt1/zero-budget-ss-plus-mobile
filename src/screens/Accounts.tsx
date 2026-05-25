@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
   getRecentTransactions,
@@ -459,8 +459,8 @@ const FILTERS: { key: FilterMode; label: string }[] = [
   { key: 'pending', label: 'Pending' },
 ];
 
-export default function Accounts({ unreviewedCount }: { unreviewedCount: number | null }) {
-  const navigate = useNavigate();
+export default function Accounts() {
+  const location = useLocation();
   const { token } = useAuth();
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const [filter, setFilter] = useState<FilterMode>('all');
@@ -469,6 +469,7 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
   const [activeFilter, setActiveFilter] = useState<ActiveFilter | null>(null);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [expandedPairIds, setExpandedPairIds] = useState<Set<string>>(new Set());
+  const highlightId = (location.state as { highlightId?: string } | null)?.highlightId ?? null;
 
   // Debounce rawQuery → debouncedQuery (150ms)
   useEffect(() => {
@@ -512,6 +513,13 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
     }
     return baseTransactions;
   }, [baseTransactions, activeFilter, debouncedQuery]);
+
+  // Auto-select a transaction navigated to from Triage's "View in list" link
+  useEffect(() => {
+    if (!highlightId || !baseTransactions) return;
+    const tx = baseTransactions.find((t) => t.transaction_id === highlightId);
+    if (tx) setSelectedTx(tx);
+  }, [highlightId, baseTransactions]);
 
   const loading = filteredBySearch === undefined;
 
@@ -614,12 +622,6 @@ export default function Accounts({ unreviewedCount }: { unreviewedCount: number 
       <header className="screen-header">
         <h2 className="screen-title">Transactions</h2>
       </header>
-
-      {unreviewedCount != null && unreviewedCount > 0 && (
-        <button className="triage-banner" onClick={() => navigate('/triage')}>
-          {unreviewedCount} transaction{unreviewedCount !== 1 ? 's' : ''} need categories → Triage
-        </button>
-      )}
 
       <div className="tx-search-wrap">
         <SearchBar
