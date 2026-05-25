@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuth } from '../hooks/useAuth';
-import { SheetsClient } from '../api/client';
+import { SheetsClient, AuthError } from '../api/client';
 import {
   classifyTransactionType,
   findTransferPair,
@@ -285,7 +285,7 @@ function TypeSelectCard({ onSelect }: { onSelect: (type: TransactionType) => voi
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function Triage() {
-  const { token } = useAuth();
+  const { token, notifySessionExpired } = useAuth();
   const navigate = useNavigate();
 
   const rawAllTxns = useLiveQuery(() => db.transactions.toArray(), []);
@@ -380,6 +380,7 @@ export default function Triage() {
     try {
       await optimisticApproveIncome(tx, new SheetsClient(SHEET_ID, token));
     } catch (e) {
+      if (e instanceof AuthError) { notifySessionExpired(); return; }
       setError('Failed to save — change reverted');
     }
   };
@@ -389,6 +390,7 @@ export default function Triage() {
     try {
       await optimisticConfirmTransfer(tx, pair, new SheetsClient(SHEET_ID, token), 'transfer');
     } catch (e) {
+      if (e instanceof AuthError) { notifySessionExpired(); return; }
       setError('Failed to save — change reverted');
     }
   };
@@ -398,6 +400,7 @@ export default function Triage() {
     try {
       await optimisticConfirmTransfer(tx, pair, new SheetsClient(SHEET_ID, token), 'credit_payment');
     } catch (e) {
+      if (e instanceof AuthError) { notifySessionExpired(); return; }
       setError('Failed to save — change reverted');
     }
   };
@@ -410,6 +413,7 @@ export default function Triage() {
     try {
       await optimisticAssignPurchase(tx, chosenCat, catRecord, new SheetsClient(SHEET_ID, token));
     } catch (e) {
+      if (e instanceof AuthError) { notifySessionExpired(); return; }
       setError('Failed to save — change reverted');
     }
   };

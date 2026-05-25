@@ -24,9 +24,13 @@ function getStoredToken(): string | null {
 export interface AuthState {
   token: string | null;
   isAuthenticated: boolean;
+  /** True when the OAuth token expired mid-session (vs. never logged in). */
+  sessionExpired: boolean;
   /** Opens the Google OAuth popup. */
   login: () => void;
   signOut: () => void;
+  /** Called when a 401 is received from the Sheets API. Clears auth and sets sessionExpired. */
+  notifySessionExpired: () => void;
 }
 
 // ─── Context ──────────────────────────────────────────────────────────────────
@@ -43,6 +47,7 @@ const AuthContext = createContext<AuthState | null>(null);
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(getStoredToken);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const login = useGoogleLogin({
     scope: `${SHEETS_SCOPE} ${DRIVE_METADATA_SCOPE}`,
@@ -50,6 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const expiry = Date.now() + response.expires_in * 1000;
       localStorage.setItem(TOKEN_KEY, response.access_token);
       localStorage.setItem(EXPIRY_KEY, String(expiry));
+      setSessionExpired(false);
       setToken(response.access_token);
     },
     onError: (error) => {
@@ -62,10 +68,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(EXPIRY_KEY);
     setToken(null);
+    setSessionExpired(false);
+  };
+
+  const notifySessionExpired = () => {
+    googleLogout();
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(EXPIRY_KEY);
+    setToken(null);
+    setSessionExpired(true);
   };
 
   return (
-    <AuthContext.Provider value={{ token, isAuthenticated: !!token, login, signOut }}>
+    <AuthContext.Provider value={{ token, isAuthenticated: !!token, sessionExpired, login, signOut, notifySessionExpired }}>
       {children}
     </AuthContext.Provider>
   );

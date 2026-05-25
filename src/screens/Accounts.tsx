@@ -13,7 +13,7 @@ import SearchBar, { type ActiveFilter } from '../components/SearchBar';
 import { Transaction, BudgetCategory, TransactionStatus, TransactionType } from '../types';
 import { useAuth } from '../hooks/useAuth';
 import { useMediaQuery } from '../hooks/useMediaQuery';
-import { SheetsClient } from '../api/client';
+import { SheetsClient, AuthError } from '../api/client';
 import { optimisticEditTransaction, optimisticConfirmTransfer } from '../db/optimisticWrites';
 import { classifyTransactionType, findTransferPair, findCcPaymentPair } from '../api/transactions';
 import { getAccountDisplayName } from '../utils/accountNames';
@@ -135,6 +135,7 @@ function TxDetailEditor({
   isDesktop: boolean;
   token: string | null;
 }) {
+  const { notifySessionExpired } = useAuth();
   const [form, setForm] = useState<FormState>(() => initForm(tx));
   const [catFilter, setCatFilter] = useState('');
   const [saving, setSaving] = useState(false);
@@ -175,7 +176,8 @@ function TxDetailEditor({
     try {
       await optimisticEditTransaction(tx, changes, new SheetsClient(SHEET_ID, token));
       onClose();
-    } catch {
+    } catch (e) {
+      if (e instanceof AuthError) { notifySessionExpired(); return; }
       setError('Save failed. Check your connection and try again.');
       setSaving(false);
     }
@@ -201,7 +203,8 @@ function TxDetailEditor({
         form.transaction_type as TransactionType
       );
       onClose();
-    } catch {
+    } catch (e) {
+      if (e instanceof AuthError) { notifySessionExpired(); return; }
       setError('Link failed. Check your connection and try again.');
       setLinkingPair(false);
     }
@@ -219,7 +222,8 @@ function TxDetailEditor({
         await optimisticEditTransaction(pairedTx, { transfer_pair_id: '' }, client);
       }
       onClose();
-    } catch {
+    } catch (e) {
+      if (e instanceof AuthError) { notifySessionExpired(); return; }
       setError('Unlink failed. Check your connection and try again.');
       setLinkingPair(false);
     }
