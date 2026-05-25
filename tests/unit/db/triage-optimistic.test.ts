@@ -169,6 +169,19 @@ describe('optimisticConfirmTransfer', () => {
     expect(revertedTx?.reviewed).toBe(false);
     expect(revertedPair?.transfer_pair_id).toBe('');
   });
+
+  it('saves credit_payment type when explicitly passed', async () => {
+    const tx = makeTx({ transaction_id: 'tx1', account: 'Checking', reviewed: false });
+    const pair = makeTx({ transaction_id: 'tx2', account: 'Chase CREDIT CARD', reviewed: false, transfer_pair_id: '' });
+    await db.transactions.bulkPut([tx, pair]);
+    mockUpdate.mockResolvedValue(undefined);
+
+    await optimisticConfirmTransfer(tx, pair, fakeClient, 'credit_payment');
+
+    const result = await db.transactions.get('tx1');
+    expect(result?.transaction_type).toBe('credit_payment');
+    expect(result?.transfer_pair_id).toBe('tx2');
+  });
 });
 
 // ─── optimisticAssignPurchase ─────────────────────────────────────────────────

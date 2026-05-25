@@ -6,6 +6,7 @@ import { SheetsClient } from '../api/client';
 import {
   classifyTransactionType,
   findTransferPair,
+  findCcPaymentPair,
 } from '../api/transactions';
 import { getActiveBudgetCategories, getSuggestedCategory } from '../db/queries';
 import {
@@ -68,6 +69,7 @@ function IncomeCard({
       {escapeOpen && (
         <div className="triage-type-selector">
           <button className="triage-type-pill" onClick={() => onTypeOverride('transfer')}>↔️ Transfer</button>
+          <button className="triage-type-pill" onClick={() => onTypeOverride('credit_payment')}>💳 CC Payment</button>
           <button className="triage-type-pill" onClick={() => onTypeOverride('regular')}>🛒 Purchase</button>
         </div>
       )}
@@ -113,6 +115,53 @@ function TransferCard({
       {escapeOpen && (
         <div className="triage-type-selector">
           <button className="triage-type-pill" onClick={() => onTypeOverride('income')}>💰 Income</button>
+          <button className="triage-type-pill" onClick={() => onTypeOverride('credit_payment')}>💳 CC Payment</button>
+          <button className="triage-type-pill" onClick={() => onTypeOverride('regular')}>🛒 Purchase</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CcPaymentCard({
+  tx,
+  pair,
+  onConfirm,
+  onTypeOverride,
+  escapeOpen,
+  onToggleEscape,
+}: {
+  tx: Transaction;
+  pair: Transaction | null;
+  onConfirm: () => void;
+  onTypeOverride: (type: TransactionType) => void;
+  escapeOpen: boolean;
+  onToggleEscape: () => void;
+}) {
+  return (
+    <div className="triage-card triage-card--cc-payment">
+      <div className="triage-card-type">💳 CC Payment</div>
+      <div className="triage-card-amount">{txAmountLabel(tx)}</div>
+      <div className="triage-card-payee">{tx.payee || tx.description || '(unknown payee)'}</div>
+      <div className="triage-card-meta">
+        <span>{tx.account}</span>
+        <span>{tx.date}</span>
+      </div>
+      {pair && (
+        <div className="triage-pair-match">Matched with {pair.account}</div>
+      )}
+      <div className="triage-actions">
+        <button className="btn btn-primary" onClick={onConfirm}>
+          Confirm
+        </button>
+      </div>
+      <button className="triage-escape-hatch" onClick={onToggleEscape}>
+        Not a CC payment {escapeOpen ? '▲' : '▾'}
+      </button>
+      {escapeOpen && (
+        <div className="triage-type-selector">
+          <button className="triage-type-pill" onClick={() => onTypeOverride('income')}>💰 Income</button>
+          <button className="triage-type-pill" onClick={() => onTypeOverride('transfer')}>↔️ Transfer</button>
           <button className="triage-type-pill" onClick={() => onTypeOverride('regular')}>🛒 Purchase</button>
         </div>
       )}
@@ -200,6 +249,7 @@ function PurchaseCard({
         <div className="triage-type-selector">
           <button className="triage-type-pill" onClick={() => onTypeOverride('income')}>💰 Income</button>
           <button className="triage-type-pill" onClick={() => onTypeOverride('transfer')}>↔️ Transfer</button>
+          <button className="triage-type-pill" onClick={() => onTypeOverride('credit_payment')}>💳 CC Payment</button>
         </div>
       )}
     </div>
@@ -213,6 +263,7 @@ function TypeSelectCard({ onSelect }: { onSelect: (type: TransactionType) => voi
       <div className="triage-type-selector triage-type-selector--large">
         <button className="triage-type-pill" onClick={() => onSelect('income')}>💰 Income</button>
         <button className="triage-type-pill" onClick={() => onSelect('transfer')}>↔️ Transfer</button>
+        <button className="triage-type-pill" onClick={() => onSelect('credit_payment')}>💳 CC Payment</button>
         <button className="triage-type-pill" onClick={() => onSelect('regular')}>🛒 Purchase</button>
       </div>
     </div>
@@ -305,11 +356,12 @@ export default function Triage() {
   }
 
   const effectiveType = overrideType ?? classifyTransactionType(tx);
-  const pair = (effectiveType === 'transfer' && overrideType === 'transfer')
-    ? findTransferPair(tx, allTxns)
-    : tx.transfer_pair_id
-      ? allTxns.find((t) => t.transaction_id === tx.transfer_pair_id) ?? null
-      : null;
+  const pair: Transaction | null = (() => {
+    if (tx.transfer_pair_id) return allTxns.find((t) => t.transaction_id === tx.transfer_pair_id) ?? null;
+    if (effectiveType === 'transfer') return findTransferPair(tx, allTxns);
+    if (effectiveType === 'credit_payment') return findCcPaymentPair(tx, allTxns);
+    return null;
+  })();
 
   const handleApproveIncome = async () => {
     if (!token) return;
@@ -323,7 +375,16 @@ export default function Triage() {
   const handleConfirmTransfer = async () => {
     if (!token) return;
     try {
-      await optimisticConfirmTransfer(tx, pair, new SheetsClient(SHEET_ID, token));
+      await optimisticConfirmTransfer(tx, pair, new SheetsClient(SHEET_ID, token), 'transfer');
+    } catch (e) {
+      setError('Failed to save — change reverted');
+    }
+  };
+
+  const handleConfirmCcPayment = async () => {
+    if (!token) return;
+    try {
+      await optimisticConfirmTransfer(tx, pair, new SheetsClient(SHEET_ID, token), 'credit_payment');
     } catch (e) {
       setError('Failed to save — change reverted');
     }
@@ -376,6 +437,16 @@ export default function Triage() {
             tx={tx}
             pair={pair}
             onConfirm={handleConfirmTransfer}
+            onTypeOverride={handleTypeOverride}
+            escapeOpen={escapeOpen}
+            onToggleEscape={() => setEscapeOpen((o) => !o)}
+          />
+        )}
+        {effectiveType === 'credit_payment' && (
+          <CcPaymentCard
+            tx={tx}
+            pair={pair}
+            onConfirm={handleConfirmCcPayment}
             onTypeOverride={handleTypeOverride}
             escapeOpen={escapeOpen}
             onToggleEscape={() => setEscapeOpen((o) => !o)}

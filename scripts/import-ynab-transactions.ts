@@ -286,6 +286,7 @@ export function buildSplitParentRow(
   row[col('account')] = first.account;
   row[col('memo')] = '';
   row[col('flag')] = first.flag;
+  row[col('transaction_type')] = detectYnabTransactionType(first);
   row[col('reviewed')] = 'TRUE';
 
   return { parentRow: row, parentId, splitGroupId };
@@ -328,6 +329,7 @@ export function buildSplitChildRows(
     row[col('account')] = r.account;
     row[col('memo')] = cleanMemo;
     row[col('flag')] = r.flag;
+    row[col('transaction_type')] = detectYnabTransactionType(r);
     row[col('reviewed')] = 'TRUE';
 
     return row;
@@ -365,9 +367,22 @@ export function buildRegularTransactionRow(
   row[col('account')] = r.account;
   row[col('memo')] = r.memo;
   row[col('flag')] = r.flag;
+  row[col('transaction_type')] = detectYnabTransactionType(r);
   row[col('reviewed')] = 'TRUE';
 
   return row;
+}
+
+/**
+ * Detect transaction type from a YNAB CSV row.
+ * - Inflow category group → income
+ * - Payee starting with "Transfer:" → transfer
+ * - Everything else → regular
+ */
+export function detectYnabTransactionType(r: YnabCsvRow): 'income' | 'transfer' | 'regular' {
+  if (r.categoryGroup === 'Inflow') return 'income';
+  if (r.payee.startsWith('Transfer:')) return 'transfer';
+  return 'regular';
 }
 
 /**
