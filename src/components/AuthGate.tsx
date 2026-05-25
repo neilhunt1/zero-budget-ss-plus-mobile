@@ -10,14 +10,18 @@ interface Props {
  * Otherwise shows a sign-in prompt.
  */
 export default function AuthGate({ children }: Props) {
-  const { isAuthenticated, login } = useAuth();
+  const { isAuthenticated, sessionExpired, login } = useAuth();
 
   if (!isAuthenticated) {
     return (
       <div className="auth-gate">
         <div className="auth-card">
           <h1 className="auth-title">Zero Budget</h1>
-          <p className="auth-subtitle">Sign in with Google to access your budget.</p>
+          <p className="auth-subtitle">
+            {sessionExpired
+              ? 'Session expired — please sign in again.'
+              : 'Sign in with Google to access your budget.'}
+          </p>
           <button className="btn-primary" onClick={() => login()}>
             Sign in with Google
           </button>

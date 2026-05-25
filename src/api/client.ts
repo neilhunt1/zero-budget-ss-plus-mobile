@@ -7,6 +7,11 @@
 
 const BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
 
+/** Thrown when the Sheets API returns 401 — token has expired. */
+export class AuthError extends Error {
+  constructor() { super('Session expired'); }
+}
+
 export class SheetsClient {
   private readonly sheetId: string;
   private token: string;
@@ -33,6 +38,8 @@ export class SheetsClient {
         ...options.headers,
       },
     });
+
+    if (res.status === 401) throw new AuthError();
 
     if (!res.ok) {
       let message = `Sheets API ${res.status}`;

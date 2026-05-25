@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuth } from '../hooks/useAuth';
 import { useMediaQuery } from '../hooks/useMediaQuery';
-import { SheetsClient } from '../api/client';
+import { SheetsClient, AuthError } from '../api/client';
 import {
   upsertAssignment,
   appendLogEntry,
@@ -50,7 +50,7 @@ interface MoveMoneyState {
 }
 
 export default function Plan() {
-  const { token } = useAuth();
+  const { token, notifySessionExpired } = useAuth();
   const [month, setMonth] = useState(() => toYYYYMM(new Date()));
   const [editState, setEditState] = useState<EditState | null>(null);
   const [moveMoneyState, setMoveMoneyState] = useState<MoveMoneyState | null>(null);
@@ -109,6 +109,7 @@ export default function Plan() {
       await new Promise((r) => setTimeout(r, 800));
       await refreshMonthBudget(token, SHEET_ID);
     } catch (e) {
+      if (e instanceof AuthError) { notifySessionExpired(); return; }
       setWriteError((e as Error).message);
     } finally {
       setApplyingTemplate(false);
@@ -135,6 +136,7 @@ export default function Plan() {
         _rowIndex: existing?._rowIndex ?? 0,
       });
     } catch (e) {
+      if (e instanceof AuthError) { notifySessionExpired(); return; }
       setEditState((prev) =>
         prev ? { ...prev, saving: false, saveError: (e as Error).message } : null
       );
@@ -221,6 +223,7 @@ export default function Plan() {
         },
       ]);
     } catch (e) {
+      if (e instanceof AuthError) { notifySessionExpired(); return; }
       setMoveMoneyState((prev) =>
         prev ? { ...prev, saving: false, saveError: (e as Error).message } : null
       );

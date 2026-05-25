@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { db } from '../db/schema';
 import { syncOnOpen } from '../db/sync';
+import { AuthError } from '../api/client';
+import { useAuth } from './useAuth';
 
 // `version` is a monotonically increasing integer that increments on every
 // server-side change to the file — much more responsive than `modifiedTime`,
@@ -31,6 +33,7 @@ const DRIVE_FILE_URL = (fileId: string) =>
  *   - If the stored IndexedDB version matches Drive, the sync is skipped entirely.
  */
 export function useSheetSync(token: string | null, intervalMs = 15_000): void {
+  const { notifySessionExpired } = useAuth();
   const disabledRef = useRef(false); // set true if Drive scope is missing (403)
   const syncingRef = useRef(false);  // prevent concurrent syncs
   const sheetId = import.meta.env.VITE_GOOGLE_SHEET_ID as string | undefined;
@@ -82,7 +85,7 @@ export function useSheetSync(token: string | null, intervalMs = 15_000): void {
           return;
         }
 
-        if (res.status === 401) return; // token expired — retry next tick
+        if (res.status === 401) { notifySessionExpired(); return; }
         if (!res.ok) return;            // transient error — retry next tick
 
         const data = (await res.json()) as { version?: string };
@@ -99,9 +102,10 @@ export function useSheetSync(token: string | null, intervalMs = 15_000): void {
         } finally {
           syncingRef.current = false;
         }
-      } catch {
+      } catch (e) {
         syncingRef.current = false;
-        // Network/sync error — ignore, retry on next interval.
+        if (e instanceof AuthError) notifySessionExpired();
+        // else: network/sync error — ignore, retry on next interval.
       }
     }
 
