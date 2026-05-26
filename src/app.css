@@ -105,6 +105,44 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .positive { color: var(--positive); }
 .negative { color: var(--negative) !important; }
 
+/* ── Runway bar ───────────────────────────────────────────────────────────── */
+.runway-bar {
+  display: block; width: 100%; padding: 12px 16px;
+  background: var(--surface); border: none; border-bottom: 1px solid var(--border);
+  text-align: left; cursor: pointer; font: inherit;
+  transition: background .12s;
+}
+.runway-bar:hover { background: #f8faff; }
+
+.runway-bar-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 6px;
+}
+.runway-bar-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .5px; color: var(--text-secondary);
+}
+.runway-bar-pct {
+  font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.runway-track {
+  height: 10px; background: #e0e0e0; border-radius: 5px; overflow: hidden;
+  margin-bottom: 6px;
+}
+.runway-fill {
+  height: 100%; border-radius: 5px;
+  transition: width .4s ease;
+}
+.runway-bar--green .runway-fill { background: var(--positive); }
+.runway-bar--green .runway-bar-pct { color: var(--positive); }
+.runway-bar--yellow .runway-fill { background: #d4900a; }
+.runway-bar--yellow .runway-bar-pct { color: #d4900a; }
+.runway-bar--red .runway-fill { background: var(--negative); }
+.runway-bar--red .runway-bar-pct { color: var(--negative); }
+.runway-bar-sub {
+  font-size: 12px; color: var(--text-secondary);
+}
+
 /* ── Plan screen ──────────────────────────────────────────────────────────── */
 .budget-summary {
   display: flex; gap: 0; background: var(--surface);

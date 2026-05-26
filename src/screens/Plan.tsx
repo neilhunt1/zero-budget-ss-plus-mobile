@@ -11,9 +11,10 @@ import {
   batchAppendLogEntries,
 } from '../api/budget';
 import { db } from '../db/schema';
-import { getBudgetForMonth, getMonthAssignments, getActiveBudgetCategories } from '../db/queries';
+import { getBudgetForMonth, getMonthAssignments, getActiveBudgetCategories, getAvgDailyIncome } from '../db/queries';
 import { refreshMonthBudget } from '../db/sync';
 import { GroupedBudget, BudgetAssignment, BudgetCategory, CategoryWithActivity } from '../types';
+import RunwayBar from '../components/RunwayBar';
 
 const SHEET_ID = import.meta.env.VITE_GOOGLE_SHEET_ID as string;
 
@@ -63,9 +64,17 @@ export default function Plan() {
   const assignments = useLiveQuery(() => getMonthAssignments(month), [month]) as BudgetAssignment[] | undefined;
   const categories = useLiveQuery(() => getActiveBudgetCategories()) as BudgetCategory[] | undefined;
   const syncMeta = useLiveQuery(() => db.syncMeta.get('all'));
+  const avgDailyIncome = (useLiveQuery(() => getAvgDailyIncome(90)) as number | undefined) ?? 0;
 
   const loading = groups === undefined;
   const readyToAssign = syncMeta?.readyToAssign ?? 0;
+  const templateTotal = (categories ?? []).reduce((s, c) => s + c.monthly_template_amount, 0);
+
+  const nextMonthDate = new Date();
+  nextMonthDate.setDate(1);
+  nextMonthDate.setMonth(nextMonthDate.getMonth() + 1);
+  const nextMonthYYYYMM = toYYYYMM(nextMonthDate);
+  const nextMonthName = nextMonthDate.toLocaleString('en-US', { month: 'long' }).toUpperCase();
 
   // Auto-select first group on desktop when data loads
   const firstGroupName = groups?.[0]?.groupName;
@@ -76,6 +85,8 @@ export default function Plan() {
   const totalAssigned = (groups ?? []).reduce((s, g) => s + g.totalAssigned, 0);
   const totalActivity = (groups ?? []).reduce((s, g) => s + g.totalActivity, 0);
   const totalAvailable = (groups ?? []).reduce((s, g) => s + g.totalAvailable, 0);
+
+  const handleRunwayTap = () => setMonth(nextMonthYYYYMM);
 
   const handleRowClick = (cat: CategoryWithActivity) => {
     const existing = (assignments ?? []).find((a) => a.category === cat.category);
@@ -268,6 +279,14 @@ export default function Plan() {
           {fmt(readyToAssign)}
         </span>
       </div>
+
+      <RunwayBar
+        currentRTA={readyToAssign}
+        templateTotal={templateTotal}
+        avgDailyIncome={avgDailyIncome}
+        nextMonthName={nextMonthName}
+        onTap={handleRunwayTap}
+      />
 
       {loading && <div className="state-msg">Loading…</div>}
       {writeError && <div className="state-msg error">{writeError}</div>}
