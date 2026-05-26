@@ -115,6 +115,19 @@ export async function getSuggestedCategory(payee: string): Promise<string | null
   return matches[0].category;
 }
 
+export async function getAvgDailyIncome(days: number = 90): Promise<number> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const results = await db.transactions
+    .where('date')
+    .aboveOrEqual(cutoffStr)
+    .filter((t) => !t.parent_id && t.transaction_type === 'income')
+    .toArray();
+  const totalInflow = results.reduce((s, t) => s + t.inflow, 0);
+  return totalInflow / days;
+}
+
 export async function getBudgetForMonth(month: string): Promise<GroupedBudget[]> {
   const [categories, assignments, calcs] = await Promise.all([
     getActiveBudgetCategories(),

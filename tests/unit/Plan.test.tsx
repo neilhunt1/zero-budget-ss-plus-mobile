@@ -29,6 +29,7 @@ vi.mock('dexie-react-hooks', async () => {
 const mockGetBudgetForMonth = vi.fn().mockResolvedValue([]);
 const mockGetMonthAssignments = vi.fn().mockResolvedValue([]);
 const mockGetActiveBudgetCategories = vi.fn().mockResolvedValue([]);
+const mockGetAvgDailyIncome = vi.fn().mockResolvedValue(0);
 const mockDbSyncMetaGet = vi.fn().mockResolvedValue({ readyToAssign: 0 });
 const mockDbAssignmentsPut = vi.fn().mockResolvedValue(undefined);
 const mockDbAssignmentsBulkPut = vi.fn().mockResolvedValue(undefined);
@@ -37,6 +38,7 @@ vi.mock('../../src/db/queries', () => ({
   getBudgetForMonth: (...args: unknown[]) => mockGetBudgetForMonth(...args),
   getMonthAssignments: (...args: unknown[]) => mockGetMonthAssignments(...args),
   getActiveBudgetCategories: () => mockGetActiveBudgetCategories(),
+  getAvgDailyIncome: () => mockGetAvgDailyIncome(),
 }));
 
 vi.mock('../../src/db/schema', () => ({
