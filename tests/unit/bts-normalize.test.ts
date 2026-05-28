@@ -185,10 +185,18 @@ function mockClient(opts: {
   // existingExtIds maps to Transactions!E2:G rows
   const extValues = (opts.existingExtIds ?? []).map(([eid, imp, st]) => [eid, imp, st]);
 
+  // Simulate the column-A occupancy used by nextTransactionRow(): header + one
+  // row per existing transaction so the function returns a sensible next row.
+  const colAValues = [
+    ['transaction_id'],
+    ...Array(opts.existingExtIds?.length ?? 0).fill(['BTS-placeholder']),
+  ];
+
   return {
     getValues: vi.fn().mockImplementation((range: string) => {
       if (range.startsWith('Transactions (BTS)')) return Promise.resolve({ values: btsValues });
       if (range.startsWith('Transactions!E2')) return Promise.resolve({ values: extValues });
+      if (range === 'Transactions!A:A') return Promise.resolve({ values: colAValues });
       return Promise.resolve({ values: [] });
     }),
     appendValues: vi.fn().mockResolvedValue(undefined),
@@ -208,7 +216,10 @@ describe('normalizeBtsTransactions', () => {
     const result = await normalizeBtsTransactions(client);
     expect(result.inserted).toBe(1);
     expect(result.updated).toBe(0);
-    expect(client.appendValues).toHaveBeenCalledOnce();
+    // appendTransactions now uses getValues + updateValues (not appendValues)
+    expect(client.updateValues).toHaveBeenCalledOnce();
+    const [range] = vi.mocked(client.updateValues).mock.calls[0];
+    expect(range).toMatch(/^Transactions!A\d+$/); // e.g. Transactions!A2
   });
 
   it('skips a row whose external_id already exists (cleared, no change)', async () => {
@@ -219,7 +230,6 @@ describe('normalizeBtsTransactions', () => {
     const result = await normalizeBtsTransactions(client);
     expect(result.inserted).toBe(0);
     expect(result.updated).toBe(0);
-    expect(client.appendValues).not.toHaveBeenCalled();
     expect(client.updateValues).not.toHaveBeenCalled();
   });
 
@@ -262,7 +272,7 @@ describe('normalizeBtsTransactions', () => {
     const client = mockClient({ btsRows: [emptyIdRow], existingExtIds: [] });
     const result = await normalizeBtsTransactions(client);
     expect(result.inserted).toBe(0);
-    expect(client.appendValues).not.toHaveBeenCalled();
+    expect(client.updateValues).not.toHaveBeenCalled();
   });
 
   it('inserts multiple new rows and skips duplicates', async () => {
@@ -273,6 +283,9 @@ describe('normalizeBtsTransactions', () => {
     });
     const result = await normalizeBtsTransactions(client);
     expect(result.inserted).toBe(1); // only bts-002 is new
-    expect(client.appendValues).toHaveBeenCalledOnce();
+    // All new rows go in a single updateValues call (one PUT)
+    expect(client.updateValues).toHaveBeenCalledOnce();
+    const [range] = vi.mocked(client.updateValues).mock.calls[0];
+    expect(range).toMatch(/^Transactions!A\d+$/);
   });
 });

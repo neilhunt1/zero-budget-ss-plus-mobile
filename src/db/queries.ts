@@ -128,6 +128,13 @@ export async function getAvgDailyIncome(days: number = 90): Promise<number> {
   return totalInflow / days;
 }
 
+export async function getSplitChildren(parentId: string): Promise<Transaction[]> {
+  return db.transactions
+    .where('parent_id')
+    .equals(parentId)
+    .sortBy('transaction_id');
+}
+
 export async function getBudgetForMonth(month: string): Promise<GroupedBudget[]> {
   const [categories, assignments, calcs] = await Promise.all([
     getActiveBudgetCategories(),

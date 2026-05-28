@@ -25,6 +25,10 @@ vi.mock('../../src/db/schema', () => ({
     },
     transactions: {
       toArray: () => Promise.resolve([]),
+      where: (_field: unknown) => ({
+        notEqual: (_val: unknown) => ({ toArray: () => Promise.resolve([]) }),
+        equals: (_val: unknown) => ({ sortBy: (_key: unknown) => Promise.resolve([]) }),
+      }),
     },
   },
 }));
@@ -36,6 +40,7 @@ vi.mock('../../src/api/client', () => ({
 vi.mock('../../src/db/optimisticWrites', () => ({
   optimisticEditTransaction: vi.fn().mockResolvedValue(undefined),
   optimisticConfirmTransfer: vi.fn().mockResolvedValue(undefined),
+  optimisticSplitTransaction: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('dexie-react-hooks', async () => {
@@ -531,16 +536,16 @@ describe('Transactions screen — type-ahead search', () => {
     mockGetTransactionsByPayee.mockResolvedValue([]);
   });
 
-  it('shows split children with (split) label in payee', async () => {
+  it('shows (split) label on parent rows that have split_group_id set', async () => {
     mockGetRecentTransactions.mockResolvedValue([
-      makeTx({ transaction_id: 'parent', payee: 'Daffy Charitable' }),
-      makeTx({ transaction_id: 'child', payee: 'EUMC Laurel', parent_id: 'parent' }),
+      makeTx({ transaction_id: 'parent', payee: 'Daffy Charitable', split_group_id: 'grp-1', category: '' }),
+      makeTx({ transaction_id: 'other', payee: 'Amazon' }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts />);
 
     await waitFor(() => {
-      expect(screen.getByText('EUMC Laurel')).toBeInTheDocument();
+      expect(screen.getByText('Daffy Charitable')).toBeInTheDocument();
       expect(document.querySelector('.tx-split-label')).toBeInTheDocument();
     });
   });

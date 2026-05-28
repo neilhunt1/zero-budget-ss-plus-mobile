@@ -80,6 +80,18 @@ export async function syncOnOpen(
 
     // Fetch all transactions (including split children for complete cache)
     const transactions = await fetchTransactions(client, { includeSplitChildren: true });
+
+    // Remove orphaned IndexedDB records that no longer exist in the sheet.
+    // This cleans up split children that were written optimistically to IndexedDB
+    // but never persisted to Sheets (e.g. due to the OVERWRITE silent-no-op bug).
+    const sheetIds = new Set(transactions.map((t) => t.transaction_id));
+    const localIds = (await db.transactions.toCollection().primaryKeys()) as string[];
+    const orphanIds = localIds.filter((id) => !sheetIds.has(id));
+    if (orphanIds.length > 0) {
+      console.log(`[sync] Purging ${orphanIds.length} orphaned transaction(s) from IndexedDB`);
+      await db.transactions.bulkDelete(orphanIds);
+    }
+
     await db.transactions.bulkPut(transactions);
     notify({
       status: isColdStart ? 'cold-start' : 'syncing',

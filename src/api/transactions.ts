@@ -125,6 +125,23 @@ export async function fetchTransactions(
 }
 
 /**
+ * Find the next empty row in the Transactions sheet by counting occupied rows
+ * in column A (which always has transaction_id set). Row 1 is the header, so
+ * data rows occupy A2:A{N}. Returns N+1 — the first empty row.
+ *
+ * This is used by append functions instead of the Sheets :append endpoint,
+ * because that endpoint's table-detection (tableRange) returns undefined on
+ * large sheets and silently falls back to the anchor cell, writing data at
+ * the wrong position (top of sheet instead of bottom).
+ */
+async function nextTransactionRow(client: SheetsClient): Promise<number> {
+  const result = await client.getValues('Transactions!A:A');
+  // values.length counts every row from A1 (header) through the last non-empty
+  // cell. Adding 1 gives the first empty row after all existing data.
+  return (result.values?.length ?? 1) + 1;
+}
+
+/**
  * Append a new transaction row to the sheet.
  * `transaction_id` should be pre-populated by the caller (e.g. crypto.randomUUID()).
  */
@@ -132,19 +149,23 @@ export async function appendTransaction(
   client: SheetsClient,
   tx: Omit<Transaction, '_rowIndex'>
 ): Promise<void> {
-  await client.appendValues('Transactions!A2', [serializeRow(tx)]);
+  const row = await nextTransactionRow(client);
+  if (import.meta.env.DEV) console.log(`[appendTransaction] → Transactions!A${row}`);
+  await client.updateValues(`Transactions!A${row}`, [serializeRow(tx)]);
 }
 
 /**
- * Append multiple transaction rows in a single API call.
+ * Append multiple transaction rows in a single PUT call.
  * Prefer this over calling appendTransaction() in a loop to avoid rate limits.
  */
 export async function appendTransactions(
   client: SheetsClient,
-  txns: Omit<Transaction, '_rowIndex'>[]
+  txns: Omit<Transaction, '_rowIndex'>[],
 ): Promise<void> {
   if (txns.length === 0) return;
-  await client.appendValues('Transactions!A2', txns.map(serializeRow));
+  const row = await nextTransactionRow(client);
+  if (import.meta.env.DEV) console.log(`[appendTransactions] ${txns.length} row(s) → Transactions!A${row}`);
+  await client.updateValues(`Transactions!A${row}`, txns.map(serializeRow));
 }
 
 /**

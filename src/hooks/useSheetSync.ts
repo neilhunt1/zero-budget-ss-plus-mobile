@@ -32,7 +32,7 @@ const DRIVE_FILE_URL = (fileId: string) =>
  *   - Polling pauses automatically when the page is hidden (Page Visibility API).
  *   - If the stored IndexedDB version matches Drive, the sync is skipped entirely.
  */
-export function useSheetSync(token: string | null, intervalMs = 15_000): void {
+export function useSheetSync(token: string | null, intervalMs = 15_000): { triggerSync: () => void } {
   const { notifySessionExpired } = useAuth();
   const disabledRef = useRef(false); // set true if Drive scope is missing (403)
   const syncingRef = useRef(false);  // prevent concurrent syncs
@@ -124,4 +124,20 @@ export function useSheetSync(token: string | null, intervalMs = 15_000): void {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [token, sheetId, intervalMs]);
+
+  /**
+   * Force an immediate re-sync regardless of the cached sheet version.
+   * Clears the stored version so the next check treats the sheet as stale,
+   * then fires the check immediately without waiting for the next poll tick.
+   */
+  function triggerSync() {
+    db.syncMeta.get('all').then((meta) => {
+      const put = meta
+        ? db.syncMeta.put({ ...meta, lastSheetVersion: '' })
+        : Promise.resolve();
+      put.then(() => checkRef.current?.());
+    });
+  }
+
+  return { triggerSync };
 }
