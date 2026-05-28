@@ -6,6 +6,11 @@ import * as path from 'path';
 // In CI these vars come from GitHub Actions secrets instead.
 config({ path: path.resolve(__dirname, '.env.test'), override: false });
 
+// Don't spin up a local preview server when pointing at an external URL
+// (e.g. the prod smoke test in main.yml hits the live GHP deployment directly).
+const baseURL = process.env.BASE_URL ?? 'http://localhost:4173';
+const needsLocalServer = baseURL.includes('localhost');
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -15,7 +20,7 @@ export default defineConfig({
   reporter: [['html'], ['list']],
 
   use: {
-    baseURL: process.env.BASE_URL ?? 'http://localhost:4173',
+    baseURL,
     screenshot: 'on',
     video: 'retain-on-failure',
     trace: 'retain-on-failure',
@@ -33,10 +38,12 @@ export default defineConfig({
         { name: 'mobile-safari', use: { ...devices['iPhone 15'] } },
       ],
 
-  webServer: {
-    command: 'npm run preview',
-    url: 'http://localhost:4173',
-    reuseExistingServer: !process.env.CI,
-    timeout: 30_000,
-  },
+  webServer: needsLocalServer
+    ? {
+        command: 'npm run preview',
+        url: 'http://localhost:4173',
+        reuseExistingServer: !process.env.CI,
+        timeout: 30_000,
+      }
+    : undefined,
 });
