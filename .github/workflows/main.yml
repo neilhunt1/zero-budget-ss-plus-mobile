@@ -117,7 +117,8 @@ jobs:
       - run: npx playwright install chromium --with-deps
 
       - name: Run smoke tests against production
-        run: npx playwright test e2e/smoke.spec.ts --project=desktop-chrome
+        # auth-free only — no credentials needed, no prod sheet access
+        run: npx playwright test e2e/smoke.spec.ts --project=desktop-chrome --grep "auth-free"
         env:
           CI: true
           BASE_URL: https://neilhunt1.github.io/zero-budget-ss-plus-mobile
