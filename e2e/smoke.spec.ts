@@ -31,6 +31,12 @@ test.describe('auth-free smoke', () => {
 
 test.describe('authenticated smoke', () => {
   test.beforeEach(async ({ page }) => {
+    // Log failed API calls so the artifact report shows why data doesn't load
+    page.on('response', (res) => {
+      if (res.url().includes('sheets.googleapis.com') && !res.ok()) {
+        console.error(`Sheets API ${res.status()}: ${res.url()}`);
+      }
+    });
     await injectServiceAccountAuth(page);
   });
 
