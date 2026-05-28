@@ -174,12 +174,14 @@ function loadEnv(): { sheetId: string; authConfig: AuthConfig } {
     envName = "dev";
   }
 
-  if (!["dev", "prod"].includes(envName)) {
-    bail(`Invalid --env value "${envName}". Use "dev" or "prod".`);
+  if (!["dev", "prod", "test"].includes(envName)) {
+    bail(`Invalid --env value "${envName}". Use "dev", "prod", or "test".`);
   }
 
   const envFile =
-    envName === "dev" ? ".env.development" : ".env.production";
+    envName === "dev" ? ".env.development"
+    : envName === "prod" ? ".env.production"
+    : ".env.test";
   const envPath = path.resolve(process.cwd(), envFile);
 
   // Load .env file if present — env vars already in the environment take precedence

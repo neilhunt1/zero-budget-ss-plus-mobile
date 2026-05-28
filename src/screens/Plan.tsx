@@ -254,7 +254,7 @@ export default function Plan() {
     : [];
 
   return (
-    <div className="screen plan-screen">
+    <div className="screen plan-screen" data-testid="plan-screen">
       <header className="screen-header">
         <h2 className="screen-title">Plan</h2>
         <input
