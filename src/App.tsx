@@ -23,7 +23,7 @@ function AppBadge({ onCount }: { onCount: (n: number | null) => void }) {
 /** Inner shell — renders inside AuthProvider so useAuth() works. */
 function AppInner() {
   const { isAuthenticated, token } = useAuth();
-  useSheetSync(token); // Drive polling — writes to IndexedDB; screens react via useLiveQuery
+  const { triggerSync } = useSheetSync(token); // Drive polling — writes to IndexedDB; screens react via useLiveQuery
   const [unreviewedCount, setUnreviewedCount] = useState<number | null>(null);
   const handleCount = useCallback((n: number | null) => setUnreviewedCount(n), []);
 
@@ -32,7 +32,7 @@ function AppInner() {
       {isAuthenticated && <AppBadge onCount={handleCount} />}
       <SyncProgress />
       <OfflineBanner />
-      {isAuthenticated && <NavBar unreviewedCount={unreviewedCount} />}
+      {isAuthenticated && <NavBar unreviewedCount={unreviewedCount} onSyncRequest={triggerSync} />}
       <main className="main-content">
         <Routes>
           <Route path="/" element={<Navigate to="/plan" replace />} />

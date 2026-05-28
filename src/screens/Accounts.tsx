@@ -15,6 +15,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { SheetsClient, AuthError } from '../api/client';
 import { optimisticEditTransaction, optimisticConfirmTransfer } from '../db/optimisticWrites';
+import SplitEditor from '../components/SplitEditor';
 import { classifyTransactionType, findTransferPair, findCcPaymentPair } from '../api/transactions';
 import { getAccountDisplayName } from '../utils/accountNames';
 
@@ -128,12 +129,17 @@ function TxDetailEditor({
   onClose,
   isDesktop,
   token,
+  onSplit,
+  splitChildren,
 }: {
   tx: Transaction;
   categories: BudgetCategory[];
   onClose: () => void;
   isDesktop: boolean;
   token: string | null;
+  onSplit?: () => void;
+  /** Existing split children — when present, shows split summary instead of category picker. */
+  splitChildren?: Transaction[];
 }) {
   const { notifySessionExpired } = useAuth();
   const [form, setForm] = useState<FormState>(() => initForm(tx));
@@ -274,30 +280,61 @@ function TxDetailEditor({
 
       {/* Row 2: Category — only shown for regular purchases */}
       {form.transaction_type === 'regular' || form.transaction_type === '' ? (
-        <>
-          <div className="tx-edit-section-title">Category</div>
-          <input
-            className="tx-edit-cat-filter"
-            placeholder="Search categories…"
-            value={catFilter}
-            onChange={(e) => setCatFilter(e.target.value)}
-          />
-          <div className="tx-edit-cat-list">
-            {filteredCats.length === 0 ? (
-              <div className="tx-edit-cat-none">No categories match.</div>
-            ) : (
-              filteredCats.map((cat) => (
-                <button
-                  key={cat.category}
-                  className={`tx-edit-cat-item${form.category === cat.category ? ' tx-edit-cat-item--selected' : ''}`}
-                  onClick={() => setField('category', cat.category)}
-                >
-                  {cat.category}
+        splitChildren && splitChildren.length > 0 ? (
+          /* Already-split: show summary of existing children */
+          <>
+            <div className="tx-edit-section-title-row">
+              <span className="tx-edit-section-title">Split</span>
+              {onSplit && (
+                <button data-testid="split-transaction-btn" className="btn-ghost btn-ghost--sm" onClick={onSplit} disabled={saving}>
+                  Modify splits
                 </button>
-              ))
-            )}
-          </div>
-        </>
+              )}
+            </div>
+            <div className="tx-edit-split-summary">
+              {splitChildren.map((child) => (
+                <div key={child.transaction_id} className="tx-edit-split-row">
+                  <span className="tx-edit-split-payee">{child.payee || tx.payee}</span>
+                  <span className="tx-edit-split-cat">{child.category}</span>
+                  <span className="tx-edit-split-amt">{fmt(child.outflow)}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          /* Normal: category picker with Split button in header */
+          <>
+            <div className="tx-edit-section-title-row">
+              <span className="tx-edit-section-title">Category</span>
+              {onSplit && (
+                <button data-testid="split-transaction-btn" className="btn-ghost btn-ghost--sm" onClick={onSplit} disabled={saving}>
+                  Split
+                </button>
+              )}
+            </div>
+            <input
+              className="tx-edit-cat-filter"
+              placeholder="Search categories…"
+              value={catFilter}
+              onChange={(e) => setCatFilter(e.target.value)}
+            />
+            <div className="tx-edit-cat-list">
+              {filteredCats.length === 0 ? (
+                <div className="tx-edit-cat-none">No categories match.</div>
+              ) : (
+                filteredCats.map((cat) => (
+                  <button
+                    key={cat.category}
+                    className={`tx-edit-cat-item${form.category === cat.category ? ' tx-edit-cat-item--selected' : ''}`}
+                    onClick={() => setField('category', cat.category)}
+                  >
+                    {cat.category}
+                  </button>
+                ))
+              )}
+            </div>
+          </>
+        )
       ) : (
         <>
           <div className="tx-edit-type-note">
@@ -472,7 +509,10 @@ export default function Accounts() {
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<ActiveFilter | null>(null);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
+  const [splitTx, setSplitTx] = useState<Transaction | null>(null);
+  const [splitEditChildren, setSplitEditChildren] = useState<Transaction[]>([]);
   const [expandedPairIds, setExpandedPairIds] = useState<Set<string>>(new Set());
+  const [expandedSplitIds, setExpandedSplitIds] = useState<Set<string>>(new Set());
   const highlightId = (location.state as { highlightId?: string } | null)?.highlightId ?? null;
 
   // Debounce rawQuery → debouncedQuery (150ms)
@@ -502,6 +542,21 @@ export default function Accounts() {
     () => db.budgetCategories.filter((c) => c.active).sortBy('sort_order'),
     []
   ) ?? [];
+
+  const allSplitChildren = useLiveQuery(
+    () => db.transactions.where('parent_id').notEqual('').toArray(),
+    []
+  ) ?? [];
+
+  const splitChildrenMap = useMemo(() => {
+    const map = new Map<string, Transaction[]>();
+    for (const child of allSplitChildren) {
+      const siblings = map.get(child.parent_id) ?? [];
+      siblings.push(child);
+      map.set(child.parent_id, siblings);
+    }
+    return map;
+  }, [allSplitChildren]);
 
   // For category filter + text narrowing: client-side filter since getTransactionsByCategory returns all
   const filteredBySearch = useMemo(() => {
@@ -619,7 +674,20 @@ export default function Accounts() {
     return `Last ${RECENT_DAYS} days · search to see all history`;
   }
 
-  const handleClose = () => setSelectedTx(null);
+  const handleClose = () => { setSelectedTx(null); setSplitTx(null); setSplitEditChildren([]); };
+
+  /** True when the transaction can be split for the first time. */
+  const canSplit = (tx: Transaction) => tx.outflow > 0 && !tx.split_group_id;
+
+  /** True when an already-split transaction can have its splits edited. */
+  const canEditSplit = (tx: Transaction) =>
+    tx.outflow > 0 && !!tx.split_group_id && splitChildrenMap.has(tx.transaction_id);
+
+  /** Opens SplitEditor for new or existing split. */
+  function handleSplit(tx: Transaction) {
+    setSplitTx(tx);
+    setSplitEditChildren(splitChildrenMap.get(tx.transaction_id) ?? []);
+  }
 
   return (
     <div className="screen transactions-screen">
@@ -711,7 +779,7 @@ export default function Accounts() {
                       <>
                         <button
                           className={txDesktopRowClass(tx, isSelected)}
-                          onClick={() => setSelectedTx(isSelected ? null : tx)}
+                          onClick={() => { setSelectedTx(isSelected ? null : tx); setSplitTx(null); setSplitEditChildren([]); }}
                           title={tx.memo || undefined}
                         >
                           <div className="tx-desktop-cols">
@@ -719,13 +787,13 @@ export default function Accounts() {
                             <span className="tx-desktop-cell tx-desktop-cell--secondary" title={tx.account}>{acct}</span>
                             <span className="tx-desktop-cell tx-desktop-cell--payee">
                               {tx.payee || tx.description || '(unknown)'}
-                              {tx.parent_id && <span className="tx-split-label"> (split)</span>}
+                              {tx.split_group_id && !tx.parent_id && <span className="tx-split-label"> (split)</span>}
                               {pairTx && (
                                 <span className="tx-pair-label"> → {getAccountDisplayName(pairTx.account)}</span>
                               )}
                             </span>
-                            <span className={`tx-desktop-cell${!tx.category ? ' tx-desktop-cell--cat-none' : ''}`}>
-                              {tx.category || 'Uncategorized'}
+                            <span className={`tx-desktop-cell${!tx.category && !tx.split_group_id ? ' tx-desktop-cell--cat-none' : ''}`}>
+                              {tx.split_group_id && !tx.parent_id ? 'Split' : (tx.category || 'Uncategorized')}
                             </span>
                             <span className="tx-desktop-cell tx-desktop-cell--secondary">{tx.memo}</span>
                             <span className={`tx-desktop-cell tx-desktop-cell--num${tx.outflow > 0 ? ' tx-desktop-cell--outflow' : ''}`}>
@@ -770,29 +838,62 @@ export default function Accounts() {
                             <span className="tx-desktop-cell" />
                           </div>
                         )}
+                        {splitChildrenMap.has(tx.transaction_id) && (() => {
+                          const splitChildren = splitChildrenMap.get(tx.transaction_id)!;
+                          const isSplitExpanded = expandedSplitIds.has(tx.transaction_id);
+                          return (
+                            <>
+                              <button
+                                className="tx-split-toggle"
+                                onClick={() => setExpandedSplitIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(tx.transaction_id)) next.delete(tx.transaction_id);
+                                  else next.add(tx.transaction_id);
+                                  return next;
+                                })}
+                              >
+                                {isSplitExpanded ? `▲ Hide ${splitChildren.length} splits` : `▼ ${splitChildren.length} splits`}
+                              </button>
+                              {isSplitExpanded && splitChildren.map((child) => (
+                                <div key={child.transaction_id} className="tx-split-child-row tx-desktop-cols">
+                                  <span className="tx-desktop-cell tx-desktop-cell--secondary" />
+                                  <span className="tx-desktop-cell tx-desktop-cell--secondary" />
+                                  <span className="tx-desktop-cell tx-desktop-cell--payee tx-desktop-cell--secondary">{child.payee}</span>
+                                  <span className="tx-desktop-cell">{child.category}</span>
+                                  <span className="tx-desktop-cell tx-desktop-cell--secondary">{child.memo}</span>
+                                  <span className="tx-desktop-cell tx-desktop-cell--num tx-desktop-cell--outflow">{child.outflow > 0 ? fmt(child.outflow) : ''}</span>
+                                  <span className="tx-desktop-cell tx-desktop-cell--num" />
+                                  <span className="tx-desktop-cell" />
+                                  <span className="tx-desktop-cell" />
+                                  <span className="tx-desktop-cell" />
+                                </div>
+                              ))}
+                            </>
+                          );
+                        })()}
                       </>
                     ) : (
                       /* ── Mobile: card-style row ── */
                       <>
                         <button
                           className={txRowClass(tx)}
-                          onClick={() => setSelectedTx(isSelected ? null : tx)}
+                          onClick={() => { setSelectedTx(isSelected ? null : tx); setSplitTx(null); setSplitEditChildren([]); }}
                         >
                           <div className="tx-row-main">
                             <span className="tx-payee">
                               {typeIcon && <span className="tx-type-icon">{typeIcon} </span>}
                               {tx.payee || tx.description || '(unknown)'}
-                              {tx.parent_id && <span className="tx-split-label"> (split)</span>}
+                              {tx.split_group_id && !tx.parent_id && <span className="tx-split-label"> (split)</span>}
                               {pairTx && <span className="tx-pair-label"> → {getAccountDisplayName(pairTx.account)}</span>}
                             </span>
                             <span className="tx-meta">
                               {acct} · {tx.status === 'pending' ? '⏳ ' : ''}{tx.date}
                             </span>
-                            <span className={`tx-category${!tx.category ? ' tx-category--none' : ''}`}>
+                            <span className={`tx-category${!tx.category && !tx.split_group_id ? ' tx-category--none' : ''}`}>
                               {tx.reviewed && tx.category && (
                                 <span className="tx-reviewed-mark" aria-hidden="true">✓ </span>
                               )}
-                              {tx.category || 'Uncategorized'}
+                              {tx.split_group_id && !tx.parent_id ? 'Split' : (tx.category || 'Uncategorized')}
                             </span>
                           </div>
                           <span className={`tx-amount${tx.inflow > 0 ? ' tx-amount--inflow' : ' tx-amount--outflow'}`}>
@@ -812,16 +913,56 @@ export default function Accounts() {
                             </span>
                           </div>
                         )}
+                        {splitChildrenMap.has(tx.transaction_id) && (() => {
+                          const splitChildren = splitChildrenMap.get(tx.transaction_id)!;
+                          const isSplitExpanded = expandedSplitIds.has(tx.transaction_id);
+                          return (
+                            <>
+                              <button
+                                className="tx-split-toggle"
+                                onClick={() => setExpandedSplitIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(tx.transaction_id)) next.delete(tx.transaction_id);
+                                  else next.add(tx.transaction_id);
+                                  return next;
+                                })}
+                              >
+                                {isSplitExpanded ? `▲ Hide ${splitChildren.length} splits` : `▼ ${splitChildren.length} splits`}
+                              </button>
+                              {isSplitExpanded && splitChildren.map((child) => (
+                                <div key={child.transaction_id} className="tx-split-child-row">
+                                  <span className="tx-payee tx-desktop-cell--secondary">{child.payee}</span>
+                                  <span className={`tx-category${!child.category ? ' tx-category--none' : ''}`}>{child.category}</span>
+                                  <span className="tx-amount tx-amount--outflow">-{fmt(child.outflow)}</span>
+                                </div>
+                              ))}
+                            </>
+                          );
+                        })()}
                       </>
                     )}
-                    {isSelected && isDesktop && (
-                      <TxDetailEditor
-                        tx={selectedTx!}
-                        categories={categories}
-                        onClose={handleClose}
-                        isDesktop={true}
-                        token={token}
-                      />
+                    {isDesktop && (isSelected || splitTx?.transaction_id === tx.transaction_id) && (
+                      splitTx?.transaction_id === tx.transaction_id
+                        ? <SplitEditor
+                            parent={splitTx}
+                            categories={categories}
+                            existingChildren={splitEditChildren}
+                            onClose={() => { setSplitTx(null); setSplitEditChildren([]); }}
+                            onSaved={splitEditChildren.length > 0
+                              ? () => { setSplitTx(null); setSplitEditChildren([]); }
+                              : handleClose}
+                            isDesktop={true}
+                            token={token}
+                          />
+                        : <TxDetailEditor
+                            tx={selectedTx!}
+                            categories={categories}
+                            onClose={handleClose}
+                            isDesktop={true}
+                            token={token}
+                            splitChildren={splitChildrenMap.get(tx.transaction_id)}
+                            onSplit={canSplit(tx) || canEditSplit(tx) ? () => handleSplit(tx) : undefined}
+                          />
                     )}
                   </div>
                 );
@@ -836,6 +977,21 @@ export default function Accounts() {
           tx={selectedTx}
           categories={categories}
           onClose={handleClose}
+          isDesktop={false}
+          token={token}
+          splitChildren={splitChildrenMap.get(selectedTx.transaction_id)}
+          onSplit={canSplit(selectedTx) || canEditSplit(selectedTx) ? () => handleSplit(selectedTx) : undefined}
+        />
+      )}
+      {splitTx && !isDesktop && (
+        <SplitEditor
+          parent={splitTx}
+          categories={categories}
+          existingChildren={splitEditChildren}
+          onClose={() => { setSplitTx(null); setSplitEditChildren([]); }}
+          onSaved={splitEditChildren.length > 0
+            ? () => { setSplitTx(null); setSplitEditChildren([]); setSelectedTx(splitTx); }
+            : handleClose}
           isDesktop={false}
           token={token}
         />

@@ -27,6 +27,13 @@ export class BudgetDatabase extends Dexie {
       budgetCalcs: '[month+category], month, category',
       syncMeta: 'key',
     });
+    this.version(2).stores({
+      transactions: 'transaction_id, date, category, account, reviewed, transaction_type, status, parent_id, split_group_id',
+      budgetCategories: 'category, category_group, active',
+      budgetAssignments: '[month+category], month, category, source',
+      budgetCalcs: '[month+category], month, category',
+      syncMeta: 'key',
+    });
   }
 }
 

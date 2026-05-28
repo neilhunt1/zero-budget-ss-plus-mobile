@@ -51,6 +51,8 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   transition: background .15s;
 }
 .btn-primary:hover { background: var(--accent-dark); }
+.btn-primary:disabled { background: #b0bec5; cursor: not-allowed; }
+.btn-primary:disabled:hover { background: #b0bec5; }
 
 /* ── Nav (mobile: bottom tab bar, desktop: left sidebar) ─────────────────── */
 .navbar {
@@ -72,6 +74,12 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   background: none; border: none; cursor: pointer; padding: 8px 12px;
   font-size: 18px; color: var(--text-secondary);
 }
+.nav-sync {
+  background: none; border: none; cursor: pointer; padding: 8px 8px;
+  font-size: 18px; color: var(--text-secondary);
+  line-height: 1;
+}
+.nav-sync:hover { color: var(--primary); }
 
 /* ── Screen shell ─────────────────────────────────────────────────────────── */
 .screen { min-height: 100%; }
@@ -384,6 +392,122 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .tx-category--none { color: var(--negative); font-weight: 600; }
 .tx-reviewed-mark { color: var(--positive); font-size: 11px; font-weight: 700; }
 .tx-split-label { font-size: 11px; color: var(--text-secondary); font-weight: 400; }
+
+/* Split expand toggle */
+.tx-split-toggle {
+  display: block;
+  width: 100%;
+  padding: 4px 12px;
+  background: #f0f4ff;
+  border: none;
+  border-bottom: 1px solid #e0e7ff;
+  color: #4f6ef2;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.tx-split-toggle:hover { background: #e5eaff; }
+
+/* Split child rows (indented, muted) */
+.tx-split-child-row {
+  padding: 6px 12px 6px 28px;
+  background: #f8faff;
+  border-bottom: 1px solid #e8ecf8;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  color: #555;
+}
+@media (min-width: 768px) {
+  .tx-split-child-row.tx-desktop-cols { padding-left: 28px; background: #f8faff; }
+}
+
+/* ── SplitEditor component ─────────────────────────────────────────────────── */
+
+/* Padded content wrapper — prevents lines from touching screen edges */
+.split-editor-content { padding: 0 16px 4px; }
+
+.split-line {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: #fff;
+}
+.split-line-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+/* Wrapper divs are the flex items — inputs inside get width:100% of the wrapper */
+.split-line-payee-wrap { flex: 1; min-width: 0; }
+.split-line-amount-wrap { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
+.split-line-amount-wrap .tx-edit-input { width: 90px; }
+.split-line-fill-btn {
+  background: none; border: 1px solid #cbd5e1; border-radius: 6px;
+  cursor: pointer; font-size: 13px; color: #4f6ef2;
+  padding: 6px 8px; flex-shrink: 0; line-height: 1;
+}
+.split-line-fill-btn:hover { background: #f0f4ff; }
+.split-line-fill-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.split-line-remove {
+  color: #888; background: none; border: none; cursor: pointer;
+  font-size: 18px; padding: 0 4px; line-height: 1; flex-shrink: 0;
+}
+.split-line-remove:hover { color: var(--negative); }
+.split-line-cat-btn {
+  width: 100%; text-align: left; padding: 6px 8px;
+  border: 1px solid #cbd5e1; border-radius: 4px;
+  background: #f8fafc; color: #64748b; cursor: pointer; font-size: 13px;
+}
+.split-line-cat-btn:hover { background: #f0f4ff; }
+.split-line-cat-btn--selected { color: #1a202c; background: #fff; }
+.split-cat-list { max-height: 160px; }
+.split-add-btn {
+  display: block; width: 100%; padding: 8px;
+  border: 1px dashed #94a3b8; border-radius: 6px;
+  background: transparent; color: #4f6ef2; cursor: pointer;
+  margin-bottom: 12px; font-size: 14px;
+}
+.split-add-btn:hover { background: #f0f4ff; border-color: #4f6ef2; }
+.split-total-row {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 13px; padding: 10px 0 8px;
+  border-top: 1px solid #e2e8f0;
+}
+.split-total-valid { color: #16a34a; font-weight: 600; }
+.split-total-over  { color: #dc2626; font-weight: 600; }
+.split-total-under { color: #d97706; font-weight: 600; }
+
+/* ── Section title row with optional action button ─────────────────────────── */
+.tx-edit-section-title-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px 4px;
+}
+.tx-edit-section-title-row .tx-edit-section-title { padding: 0; }
+/* Small accent button for section-level actions (Split, Modify splits) */
+.btn-ghost--sm {
+  background: none; border: 1px solid var(--accent, #4f6ef2); border-radius: 6px;
+  cursor: pointer; font-size: 12px; font-weight: 600; color: var(--accent, #4f6ef2);
+  padding: 3px 10px; white-space: nowrap;
+}
+.btn-ghost--sm:hover { background: #f0f4ff; }
+.btn-ghost--sm:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── Split summary inside TxDetailEditor (already-split transactions) ──────── */
+.tx-edit-split-summary {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0;
+}
+.tx-edit-split-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 16px; border-top: 1px solid #f0f0f0; font-size: 13px;
+}
+.tx-edit-split-payee { flex: 1; min-width: 0; color: var(--text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tx-edit-split-cat { flex: 1; min-width: 0; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tx-edit-split-amt { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--negative); flex-shrink: 0; }
 .tx-amount { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; flex-shrink: 0; }
 .tx-amount--inflow  { color: var(--positive); }
 .tx-amount--outflow { color: var(--negative); }

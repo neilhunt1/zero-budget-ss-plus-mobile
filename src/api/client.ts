@@ -68,14 +68,46 @@ export class SheetsClient {
   }
 
   /** POST — appends rows below the last non-empty row in the range.
-   * Uses OVERWRITE (not INSERT_ROWS) to avoid triggering formula-range
-   * adjustments in dependent sheets (Budget_Calcs SUMIFS) which cause a
-   * brief recalculation gap where reads return stale zero values. */
-  async appendValues(range: string, values: unknown[][]): Promise<void> {
-    await this.request(
-      `/values/${enc(range)}:append?valueInputOption=RAW&insertDataOption=OVERWRITE`,
-      { method: 'POST', body: JSON.stringify({ range, values }) }
+   *
+   * insertDataOption controls how Google Sheets inserts the data:
+   * - OVERWRITE (default): writes to existing empty cells after the last data row.
+   *   Avoids triggering formula-range adjustments in Budget_Calcs SUMIFS, which
+   *   can cause a brief recalculation gap with stale zero values.
+   * - INSERT_ROWS: physically inserts new rows. Prefer OVERWRITE unless rows must
+   *   be guaranteed to appear even when the sheet has no allocated empty rows.
+   *
+   * Note: for the Transactions tab specifically, use appendTransactions() which
+   * avoids the :append endpoint entirely (its table-detection is unreliable on
+   * large sheets) and instead does a getValues read to find the next empty row.
+   */
+  async appendValues(
+    range: string,
+    values: unknown[][],
+    insertDataOption: 'OVERWRITE' | 'INSERT_ROWS' = 'OVERWRITE',
+  ): Promise<void> {
+    const result = await this.request<{
+      tableRange?: string;
+      updates?: { updatedRange?: string; updatedRows?: number; updatedCells?: number };
+    }>(
+      `/values/${enc(range)}:append?valueInputOption=RAW&insertDataOption=${insertDataOption}`,
+      { method: 'POST', body: JSON.stringify({ range, values }) },
     );
+    if (import.meta.env.DEV) {
+      console.log(
+        `[Sheets.append] ${range} (${insertDataOption}): ` +
+        `tableRange=${result?.tableRange}, ` +
+        `updatedRange=${result?.updates?.updatedRange}, ` +
+        `rows=${result?.updates?.updatedRows}, ` +
+        `cells=${result?.updates?.updatedCells}`,
+      );
+    }
+    if (values.length > 0 && (result?.updates?.updatedRows ?? 0) === 0) {
+      throw new Error(
+        `Sheets append wrote 0 rows (${insertDataOption}); ` +
+        `${values.length} row(s) sent to ${range}. ` +
+        `tableRange detected: ${result?.tableRange ?? 'unknown'}`,
+      );
+    }
   }
 
   /** POST — update multiple non-contiguous ranges in a single request. */
