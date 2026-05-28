@@ -30,7 +30,7 @@ export default function NavBar({
   const syncAge = useSyncAge();
 
   return (
-    <nav className="navbar">
+    <nav className="navbar" data-testid="nav-bar">
       <div className="navbar-brand">Zero Budget</div>
       <div className="navbar-tabs">
         <NavLink to="/plan" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>

@@ -5,6 +5,10 @@ test-results/
 # Environment files with secrets
 .env.development
 .env.production
+.env.test
+
+# Playwright output
+playwright-report/
 
 # Service account keys — never commit
 service-account-*.json

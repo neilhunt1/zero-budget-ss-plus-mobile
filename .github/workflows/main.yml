@@ -96,3 +96,32 @@ jobs:
     steps:
       - uses: actions/deploy-pages@v5
         id: deployment
+
+  smoke-test:
+    name: Smoke test production
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - run: npx playwright install chromium --with-deps
+
+      - name: Run smoke tests against production
+        # Reads prod sheet data (no writes). Assertions are loose (.first()) so
+        # they're stable against real changing data. Skips transactions.spec.ts
+        # which uses seeded test-sheet data and exact counts.
+        run: npx playwright test e2e/smoke.spec.ts --project=desktop-chrome
+        env:
+          CI: true
+          BASE_URL: https://neilhunt1.github.io/zero-budget-ss-plus-mobile
+          E2E_SERVICE_ACCOUNT_TOKEN: ${{ secrets.E2E_SERVICE_ACCOUNT_TOKEN }}

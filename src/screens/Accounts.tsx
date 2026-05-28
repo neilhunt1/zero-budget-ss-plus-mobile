@@ -472,12 +472,12 @@ function TxDetailEditor({
   );
 
   if (isDesktop) {
-    return <div className="tx-edit-inline">{formContent}</div>;
+    return <div className="tx-edit-inline" data-testid="tx-detail">{formContent}</div>;
   }
 
   return (
     <div className="assign-overlay" onClick={onClose}>
-      <div className="assign-sheet tx-detail-sheet" onClick={(e) => e.stopPropagation()}>
+      <div className="assign-sheet tx-detail-sheet" data-testid="tx-detail" onClick={(e) => e.stopPropagation()}>
         <div className="assign-sheet-handle" />
         <div className="tx-detail-hero">
           <span className={`tx-detail-amount${tx.inflow > 0 ? ' tx-amount--inflow' : ' tx-amount--outflow'}`}>
@@ -690,7 +690,7 @@ export default function Accounts() {
   }
 
   return (
-    <div className="screen transactions-screen">
+    <div className="screen transactions-screen" data-testid="accounts-screen">
       <header className="screen-header">
         <h2 className="screen-title">Transactions</h2>
       </header>
@@ -731,7 +731,7 @@ export default function Accounts() {
       {loading && <div className="state-msg">Loading…</div>}
 
       {!loading && (
-        <div className="tx-list">
+        <div className="tx-list" data-testid="tx-list">
           {visibleRows.length === 0 ? (
             <div className="state-msg">No transactions in this view.</div>
           ) : (
@@ -781,6 +781,8 @@ export default function Accounts() {
                           className={txDesktopRowClass(tx, isSelected)}
                           onClick={() => { setSelectedTx(isSelected ? null : tx); setSplitTx(null); setSplitEditChildren([]); }}
                           title={tx.memo || undefined}
+                          data-testid="tx-row"
+                          data-transaction-id={tx.transaction_id}
                         >
                           <div className="tx-desktop-cols">
                             <span className="tx-desktop-cell tx-desktop-cell--secondary">{fmtDate(tx.date)}</span>
@@ -878,6 +880,8 @@ export default function Accounts() {
                         <button
                           className={txRowClass(tx)}
                           onClick={() => { setSelectedTx(isSelected ? null : tx); setSplitTx(null); setSplitEditChildren([]); }}
+                          data-testid="tx-row"
+                          data-transaction-id={tx.transaction_id}
                         >
                           <div className="tx-row-main">
                             <span className="tx-payee">

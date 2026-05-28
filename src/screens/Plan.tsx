@@ -254,7 +254,7 @@ export default function Plan() {
     : [];
 
   return (
-    <div className="screen plan-screen">
+    <div className="screen plan-screen" data-testid="plan-screen">
       <header className="screen-header">
         <h2 className="screen-title">Plan</h2>
         <input
@@ -359,6 +359,7 @@ export default function Plan() {
                           key={cat.category}
                           type="button"
                           className={`budget-row${cat.available < 0 ? ' overspent' : ''}`}
+                          data-testid="budget-row"
                           onClick={() => handleRowClick(cat)}
                         >
                           <span className="col-name">{cat.category}</span>
