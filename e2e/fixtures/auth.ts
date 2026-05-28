@@ -15,8 +15,9 @@ const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.metadata.readonly';
  *   4. GOOGLE_SERVICE_ACCOUNT_KEY_PATH — path to JSON file (already in .env.test)
  */
 function loadCredentials(): object {
+  // Use || not ?? so empty-string env vars (GitHub's default for missing secrets) fall through
   const inlineKey =
-    process.env.E2E_SERVICE_ACCOUNT_TOKEN ?? process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+    process.env.E2E_SERVICE_ACCOUNT_TOKEN || process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
   if (inlineKey) {
     return JSON.parse(inlineKey);
   }

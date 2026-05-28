@@ -127,6 +127,8 @@ jobs:
         env:
           CI: true
           E2E_SERVICE_ACCOUNT_TOKEN: ${{ secrets.E2E_SERVICE_ACCOUNT_TOKEN }}
+          # Belt-and-suspenders: auth.ts falls back to this if E2E_SERVICE_ACCOUNT_TOKEN is empty
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
