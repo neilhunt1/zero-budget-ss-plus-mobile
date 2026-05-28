@@ -10,7 +10,7 @@ test.describe('auth-free smoke', () => {
       if (msg.type() === 'error') messages.push(msg.text());
     });
 
-    await page.goto('/');
+    await page.goto('./');
     await expect(page).toHaveTitle(/Zero Budget/);
 
     // Give the app a moment to finish initialising
@@ -19,7 +19,7 @@ test.describe('auth-free smoke', () => {
   });
 
   test('login screen is visible when unauthenticated', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('./');
     await page.waitForLoadState('networkidle');
     await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
   });
@@ -35,7 +35,7 @@ test.describe('authenticated smoke', () => {
   });
 
   test('plan screen loads with budget data', async ({ page }) => {
-    await page.goto('/#/plan');
+    await page.goto('./#/plan');
     await expect(page.getByTestId('nav-bar')).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId('plan-screen')).toBeVisible({ timeout: 15_000 });
     // At least one budget row proves the Sheets API call returned data
@@ -43,7 +43,7 @@ test.describe('authenticated smoke', () => {
   });
 
   test('accounts screen loads with transactions', async ({ page }) => {
-    await page.goto('/#/accounts');
+    await page.goto('./#/accounts');
     await expect(page.getByTestId('tx-list')).toBeVisible({ timeout: 15_000 });
     // At least one transaction proves the Transactions tab loaded from the sheet
     await expect(page.getByTestId('tx-row').first()).toBeVisible({ timeout: 30_000 });

@@ -8,7 +8,9 @@ config({ path: path.resolve(__dirname, '.env.test'), override: false });
 
 // Don't spin up a local preview server when pointing at an external URL
 // (e.g. the prod smoke test in main.yml hits the live GHP deployment directly).
-const baseURL = process.env.BASE_URL ?? 'http://localhost:4173';
+// Normalize to trailing slash so relative goto calls ('./#/route') resolve correctly —
+// without it, './' resolves to the parent directory instead of the app root.
+const baseURL = (process.env.BASE_URL ?? 'http://localhost:4173').replace(/\/?$/, '/');
 const needsLocalServer = baseURL.includes('localhost');
 
 export default defineConfig({

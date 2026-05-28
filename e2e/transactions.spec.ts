@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
 
 test.describe('Transactions screen', () => {
   test('loads and shows seeded transactions', async ({ page }) => {
-    await page.goto('/#/accounts');
+    await page.goto('./#/accounts');
 
     // Wait for the initial sheet sync — transactions come from Google Sheets on first load
     const txList = page.getByTestId('tx-list');
@@ -23,7 +23,7 @@ test.describe('Transactions screen', () => {
   });
 
   test('shows correct payee and amount for known seed transactions', async ({ page }) => {
-    await page.goto('/#/accounts');
+    await page.goto('./#/accounts');
     const txList = page.getByTestId('tx-list');
 
     // Wait for sync
@@ -45,7 +45,7 @@ test.describe('Transactions screen', () => {
   });
 
   test('opens transaction detail on row click', async ({ page }) => {
-    await page.goto('/#/accounts');
+    await page.goto('./#/accounts');
     const txList = page.getByTestId('tx-list');
     await expect(txList.getByTestId('tx-row').first()).toBeVisible({ timeout: 30_000 });
 
@@ -66,7 +66,7 @@ test.describe('Transactions screen', () => {
   });
 
   test('filter chips narrow the transaction list', async ({ page }) => {
-    await page.goto('/#/accounts');
+    await page.goto('./#/accounts');
     const txList = page.getByTestId('tx-list');
     await expect(txList.getByTestId('tx-row').first()).toBeVisible({ timeout: 30_000 });
 
