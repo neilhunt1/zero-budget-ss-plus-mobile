@@ -359,6 +359,7 @@ export default function Plan() {
                           key={cat.category}
                           type="button"
                           className={`budget-row${cat.available < 0 ? ' overspent' : ''}`}
+                          data-testid="budget-row"
                           onClick={() => handleRowClick(cat)}
                         >
                           <span className="col-name">{cat.category}</span>

@@ -26,18 +26,26 @@ test.describe('auth-free smoke', () => {
 });
 
 // ─── Authenticated smoke (proves auth injection + sheet data path) ────────────
+// Assertions are intentionally loose (`.first()`, not exact counts) so these
+// are stable against real changing prod data as well as seeded test data.
 
 test.describe('authenticated smoke', () => {
   test.beforeEach(async ({ page }) => {
     await injectServiceAccountAuth(page);
   });
 
-  test('Plan screen is visible after auth injection', async ({ page }) => {
+  test('plan screen loads with budget data', async ({ page }) => {
     await page.goto('/#/plan');
-    await page.waitForLoadState('networkidle');
-
-    // The Plan screen renders a header and category list — wait for the nav to appear
     await expect(page.getByTestId('nav-bar')).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId('plan-screen')).toBeVisible({ timeout: 15_000 });
+    // At least one budget row proves the Sheets API call returned data
+    await expect(page.getByTestId('budget-row').first()).toBeVisible({ timeout: 20_000 });
+  });
+
+  test('accounts screen loads with transactions', async ({ page }) => {
+    await page.goto('/#/accounts');
+    await expect(page.getByTestId('tx-list')).toBeVisible({ timeout: 15_000 });
+    // At least one transaction proves the Transactions tab loaded from the sheet
+    await expect(page.getByTestId('tx-row').first()).toBeVisible({ timeout: 30_000 });
   });
 });
