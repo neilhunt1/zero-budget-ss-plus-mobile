@@ -125,3 +125,11 @@ jobs:
           CI: true
           BASE_URL: https://neilhunt1.github.io/zero-budget-ss-plus-mobile
           E2E_SERVICE_ACCOUNT_TOKEN: ${{ secrets.E2E_SERVICE_ACCOUNT_TOKEN }}
+
+      - name: Upload smoke test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-report-${{ github.run_number }}
+          path: playwright-report/
+          retention-days: 14

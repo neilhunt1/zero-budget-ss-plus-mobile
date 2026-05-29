@@ -42,16 +42,16 @@ test.describe('authenticated smoke', () => {
 
   test('plan screen loads with budget data', async ({ page }) => {
     await page.goto('./#/plan');
-    await expect(page.getByTestId('nav-bar')).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId('plan-screen')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('nav-bar')).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByTestId('plan-screen')).toBeVisible({ timeout: 5_000 });
     // At least one budget row proves the Sheets API call returned data
-    await expect(page.getByTestId('budget-row').first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('budget-row').first()).toBeVisible({ timeout: 15_000 });
   });
 
   test('accounts screen loads with transactions', async ({ page }) => {
     await page.goto('./#/accounts');
-    await expect(page.getByTestId('tx-list')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('tx-list')).toBeVisible({ timeout: 5_000 });
     // At least one transaction proves the Transactions tab loaded from the sheet
-    await expect(page.getByTestId('tx-row').first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('tx-row').first()).toBeVisible({ timeout: 15_000 });
   });
 });
