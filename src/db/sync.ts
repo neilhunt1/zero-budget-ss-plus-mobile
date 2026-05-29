@@ -76,7 +76,13 @@ export async function syncOnOpen(
 
     // Normalize new BTS rows into Transactions tab before fetching,
     // so the fetch below picks them up in the same sync cycle.
-    await normalizeBtsTransactions(client);
+    // Non-fatal: a BTS write failure (e.g. row-range bug, 400 from Sheets)
+    // should not prevent the data reads that follow.
+    try {
+      await normalizeBtsTransactions(client);
+    } catch (e) {
+      console.warn('[sync] BTS normalization failed — skipping, data reads will continue:', e);
+    }
 
     // Fetch all transactions (including split children for complete cache)
     const transactions = await fetchTransactions(client, { includeSplitChildren: true });
