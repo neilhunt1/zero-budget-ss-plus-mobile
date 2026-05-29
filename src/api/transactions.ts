@@ -150,12 +150,18 @@ export async function appendTransaction(
   tx: Omit<Transaction, '_rowIndex'>
 ): Promise<void> {
   const row = await nextTransactionRow(client);
-  if (import.meta.env.DEV) console.log(`[appendTransaction] → Transactions!A${row}`);
-  await client.updateValues(`Transactions!A${row}`, [serializeRow(tx)]);
+  // Anchor to the last data row and INSERT_ROWS so the sheet auto-extends even
+  // when row `row` hasn't been allocated yet. values.update (PUT) requires the
+  // target row to already exist, which fails with 400 when the sheet is exactly
+  // at its row-count boundary. Anchoring to the last *data* row (not A1) avoids
+  // the table-detection unreliability seen with :append on large sheets.
+  const anchor = `Transactions!A${row - 1}`;
+  if (import.meta.env.DEV) console.log(`[appendTransaction] → after row ${row - 1} (anchor ${anchor})`);
+  await client.appendValues(anchor, [serializeRow(tx)], 'INSERT_ROWS');
 }
 
 /**
- * Append multiple transaction rows in a single PUT call.
+ * Append multiple transaction rows in a single call.
  * Prefer this over calling appendTransaction() in a loop to avoid rate limits.
  */
 export async function appendTransactions(
@@ -164,8 +170,11 @@ export async function appendTransactions(
 ): Promise<void> {
   if (txns.length === 0) return;
   const row = await nextTransactionRow(client);
-  if (import.meta.env.DEV) console.log(`[appendTransactions] ${txns.length} row(s) → Transactions!A${row}`);
-  await client.updateValues(`Transactions!A${row}`, txns.map(serializeRow));
+  // See appendTransaction() for why INSERT_ROWS anchored to the last data row
+  // is used instead of values.update (PUT).
+  const anchor = `Transactions!A${row - 1}`;
+  if (import.meta.env.DEV) console.log(`[appendTransactions] ${txns.length} row(s) → after row ${row - 1}`);
+  await client.appendValues(anchor, txns.map(serializeRow), 'INSERT_ROWS');
 }
 
 /**

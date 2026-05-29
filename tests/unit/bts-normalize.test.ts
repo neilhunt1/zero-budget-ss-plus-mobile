@@ -216,10 +216,11 @@ describe('normalizeBtsTransactions', () => {
     const result = await normalizeBtsTransactions(client);
     expect(result.inserted).toBe(1);
     expect(result.updated).toBe(0);
-    // appendTransactions now uses getValues + updateValues (not appendValues)
-    expect(client.updateValues).toHaveBeenCalledOnce();
-    const [range] = vi.mocked(client.updateValues).mock.calls[0];
-    expect(range).toMatch(/^Transactions!A\d+$/); // e.g. Transactions!A2
+    // appendTransactions uses INSERT_ROWS append anchored to the last data row
+    expect(client.appendValues).toHaveBeenCalledOnce();
+    const [range] = vi.mocked(client.appendValues).mock.calls[0];
+    expect(range).toMatch(/^Transactions!A\d+$/); // anchor, e.g. Transactions!A2
+    expect(vi.mocked(client.appendValues).mock.calls[0][2]).toBe('INSERT_ROWS');
   });
 
   it('skips a row whose external_id already exists (cleared, no change)', async () => {
@@ -231,6 +232,7 @@ describe('normalizeBtsTransactions', () => {
     expect(result.inserted).toBe(0);
     expect(result.updated).toBe(0);
     expect(client.updateValues).not.toHaveBeenCalled();
+    expect(client.appendValues).not.toHaveBeenCalled();
   });
 
   it('handles pending → cleared transition', async () => {
@@ -258,6 +260,7 @@ describe('normalizeBtsTransactions', () => {
     const result = await normalizeBtsTransactions(client);
     expect(result.updated).toBe(0);
     expect(client.updateValues).not.toHaveBeenCalled();
+    expect(client.appendValues).not.toHaveBeenCalled();
   });
 
   it('returns 0,0 when BTS tab has no data rows', async () => {
@@ -273,6 +276,7 @@ describe('normalizeBtsTransactions', () => {
     const result = await normalizeBtsTransactions(client);
     expect(result.inserted).toBe(0);
     expect(client.updateValues).not.toHaveBeenCalled();
+    expect(client.appendValues).not.toHaveBeenCalled();
   });
 
   it('inserts multiple new rows and skips duplicates', async () => {
@@ -283,9 +287,9 @@ describe('normalizeBtsTransactions', () => {
     });
     const result = await normalizeBtsTransactions(client);
     expect(result.inserted).toBe(1); // only bts-002 is new
-    // All new rows go in a single updateValues call (one PUT)
-    expect(client.updateValues).toHaveBeenCalledOnce();
-    const [range] = vi.mocked(client.updateValues).mock.calls[0];
+    // All new rows go in a single appendValues call (INSERT_ROWS)
+    expect(client.appendValues).toHaveBeenCalledOnce();
+    const [range] = vi.mocked(client.appendValues).mock.calls[0];
     expect(range).toMatch(/^Transactions!A\d+$/);
   });
 });
