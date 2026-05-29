@@ -390,9 +390,20 @@ async function writeHeaders(
 
     const currentValues = existing.data.values?.[0] ?? [];
 
-    if (currentValues.length > 0) {
-      log(`Headers: ${title} row ${headerRow} already has headers, skipping`);
+    // Compare actual content against the expected column names — not just presence.
+    // An earlier provisioning could have left category *data* at the header row
+    // (e.g. Budget!A6 when CATEGORIES_START_ROW was 6); checking length>0 would
+    // wrongly skip writing the real column headers in that case.
+    const headersCorrect =
+      currentValues.length >= columns.length &&
+      columns.every((col, i) => currentValues[i]?.trim() === col.trim());
+
+    if (headersCorrect) {
+      log(`Headers: ${title} row ${headerRow} already correct, skipping`);
     } else {
+      if (currentValues.length > 0) {
+        log(`Headers: ${title} row ${headerRow} has stale/incorrect content — overwriting with column headers`);
+      }
       await sheets.spreadsheets.values.update({
         spreadsheetId: sheetId,
         range: `${title}!A${headerRow}`,
