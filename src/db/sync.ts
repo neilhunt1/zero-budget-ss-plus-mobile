@@ -3,7 +3,9 @@ import { fetchTransactions } from '../api/transactions';
 import {
   fetchBudgetCategories,
   fetchAllAssignments,
+  fetchAllGroupAssignments,
   fetchAllCategoryCalcEntries,
+  fetchGroupMetadata,
   fetchReadyToAssign,
 } from '../api/budget';
 import { normalizeBtsTransactions } from '../api/bts';
@@ -117,6 +119,14 @@ export async function syncOnOpen(
     const calcs = await fetchAllCategoryCalcEntries(client);
     await db.budgetCalcs.bulkPut(calcs);
 
+    // Group metadata (budget_type, rollover settings)
+    const groups = await fetchGroupMetadata(client);
+    await db.budgetGroups.bulkPut(groups);
+
+    // Group-level budget assignments (rows with blank category in assignments table)
+    const groupAssignments = await fetchAllGroupAssignments(client);
+    await db.budgetGroupAssignments.bulkPut(groupAssignments);
+
     const readyToAssign = await fetchReadyToAssign(client);
 
     await db.syncMeta.put({
@@ -145,12 +155,14 @@ export async function syncOnOpen(
  */
 export async function refreshMonthBudget(token: string, sheetId: string): Promise<void> {
   const client = new SheetsClient(sheetId, token);
-  const [assignments, calcs, readyToAssign] = await Promise.all([
+  const [assignments, groupAssignments, calcs, readyToAssign] = await Promise.all([
     fetchAllAssignments(client),
+    fetchAllGroupAssignments(client),
     fetchAllCategoryCalcEntries(client),
     fetchReadyToAssign(client),
   ]);
   await db.budgetAssignments.bulkPut(assignments);
+  await db.budgetGroupAssignments.bulkPut(groupAssignments);
   await db.budgetCalcs.bulkPut(calcs);
   const lastSync = await db.syncMeta.get('all');
   if (lastSync) {

@@ -126,6 +126,7 @@ jobs:
         run: npm run test:e2e
         env:
           CI: true
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID_TEST }}
           E2E_SERVICE_ACCOUNT_TOKEN: ${{ secrets.E2E_SERVICE_ACCOUNT_TOKEN }}
           # Belt-and-suspenders: auth.ts falls back to this if E2E_SERVICE_ACCOUNT_TOKEN is empty
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}

@@ -57,9 +57,11 @@ vi.mock('../../../src/api/budget', () => ({
   fetchAllAssignments: vi.fn().mockResolvedValue([
     { month: '2025-04', category: 'Groceries 🛒', assigned: 400, source: 'manual', _rowIndex: 509 },
   ]),
+  fetchAllGroupAssignments: vi.fn().mockResolvedValue([]),
   fetchAllCategoryCalcEntries: vi.fn().mockResolvedValue([
     { month: '2025-04', category: 'Groceries 🛒', activity: 50, available: 350 },
   ]),
+  fetchGroupMetadata: vi.fn().mockResolvedValue([]),
   fetchReadyToAssign: vi.fn().mockResolvedValue(1234),
 }));
 

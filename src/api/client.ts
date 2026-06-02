@@ -28,7 +28,7 @@ export class SheetsClient {
 
   // ─── Low-level fetch helper ──────────────────────────────────────────────────
 
-  private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  private async request<T>(path: string, options: RequestInit = {}, attempt = 0): Promise<T> {
     const url = `${BASE}/${this.sheetId}${path}`;
     const res = await fetch(url, {
       ...options,
@@ -40,6 +40,17 @@ export class SheetsClient {
     });
 
     if (res.status === 401) throw new AuthError();
+
+    // 429 Too Many Requests — back off and retry up to 3 times.
+    // Google Sheets API returns a Retry-After header (seconds); fall back to
+    // exponential backoff (2s, 4s, 8s) if the header is absent.
+    if (res.status === 429 && attempt < 3) {
+      const retryAfter = parseInt(res.headers.get('Retry-After') ?? '0', 10);
+      const delay = retryAfter > 0 ? retryAfter * 1000 : Math.pow(2, attempt + 1) * 1000;
+      console.warn(`[SheetsClient] 429 rate limit on ${path} — retrying in ${delay}ms (attempt ${attempt + 1}/3)`);
+      await new Promise<void>((resolve) => setTimeout(resolve, delay));
+      return this.request<T>(path, options, attempt + 1);
+    }
 
     if (!res.ok) {
       let message = `Sheets API ${res.status}`;

@@ -1,5 +1,5 @@
 import { SheetsClient } from './client';
-import { BudgetCategory, BudgetAssignment, BudgetCalcEntry, CategoryType, CategoryWithActivity, GroupedBudget, CategoryCalcs } from '../types';
+import { BudgetCategory, BudgetAssignment, BudgetCalcEntry, CategoryType, CategoryWithActivity, GroupedBudget, CategoryCalcs, BudgetGroup, GroupBudgetAssignment, GroupBudgetType } from '../types';
 
 // Column order must match scripts/setup-sheet.ts BUDGET_CATEGORY_COLUMNS exactly.
 const CATEGORY_COLS = [
@@ -67,9 +67,10 @@ export async function fetchBudgetCategories(
 
 /**
  * Fetch all budget assignments across all months (used by the sync layer to populate IndexedDB).
+ * Excludes group-budget rows (where category is blank) — use fetchAllGroupAssignments for those.
  */
 export async function fetchAllAssignments(client: SheetsClient): Promise<BudgetAssignment[]> {
-  const res = await client.getValues(`Budget!A${ASSIGNMENTS_START_ROW + 1}:D`);
+  const res = await client.getValues(`Budget!A${ASSIGNMENTS_START_ROW + 1}:E`);
   const rows = res.values ?? [];
   return rows
     .map(
@@ -81,7 +82,58 @@ export async function fetchAllAssignments(client: SheetsClient): Promise<BudgetA
         _rowIndex: ASSIGNMENTS_START_ROW + 1 + i,
       })
     )
-    .filter((a) => a.month && a.category);
+    .filter((a) => a.month && a.category); // category blank = group budget row, excluded here
+}
+
+/**
+ * Fetch group-level budget assignments (rows where category is blank and category_group is set).
+ * Used by the sync layer to populate budgetGroupAssignments in IndexedDB.
+ */
+export async function fetchAllGroupAssignments(client: SheetsClient): Promise<GroupBudgetAssignment[]> {
+  const res = await client.getValues(`Budget!A${ASSIGNMENTS_START_ROW + 1}:E`);
+  const rows = res.values ?? [];
+  return rows
+    .map(
+      (row, i): GroupBudgetAssignment | null => {
+        const category = row[1] ?? '';
+        const category_group = row[4] ?? '';
+        if (category !== '' || !category_group) return null;
+        return {
+          month: row[0] ?? '',
+          category_group,
+          assigned: parseFloat(row[2]) || 0,
+          source: row[3] ?? 'manual',
+          _rowIndex: ASSIGNMENTS_START_ROW + 1 + i,
+        };
+      }
+    )
+    .filter((a): a is GroupBudgetAssignment => a !== null && !!a.month);
+}
+
+/**
+ * Fetch group metadata from the Groups tab.
+ * Returns an empty array if the tab doesn't exist yet (sheet not yet set up with setup:dev).
+ */
+export async function fetchGroupMetadata(client: SheetsClient): Promise<BudgetGroup[]> {
+  let res;
+  try {
+    res = await client.getValues('Groups!A2:E');
+  } catch (e) {
+    // Tab doesn't exist yet — degrade gracefully until setup:dev is run
+    console.warn('[budget] Groups tab not found, skipping group metadata:', (e as Error).message);
+    return [];
+  }
+  const rows = res.values ?? [];
+  return rows
+    .map((row, i): BudgetGroup => ({
+      group_name: row[0] ?? '',
+      budget_type: row[1] === 'by_group' ? 'by_group' : 'by_category',
+      rollover: (row[2] ?? '').toUpperCase() === 'TRUE',
+      rollover_start_month: row[3] ?? '',
+      monthly_template_amount: parseFloat(row[4]) || 0,
+      _rowIndex: i + 2,
+    }))
+    .filter((g) => g.group_name);
 }
 
 /**
@@ -150,6 +202,30 @@ export async function upsertAssignment(
   } else {
     await client.appendValues(`Budget!A${ASSIGNMENTS_START_ROW + 1}`, [
       [month, category, assigned, source],
+    ]);
+  }
+}
+
+/**
+ * Set the group-level assigned amount for a group in a given month.
+ * Stores as a row with blank category and category_group in column E.
+ */
+export async function upsertGroupAssignment(
+  client: SheetsClient,
+  month: string,
+  category_group: string,
+  assigned: number,
+  existing?: GroupBudgetAssignment,
+  source = 'manual'
+): Promise<void> {
+  if (existing) {
+    await client.updateValues(
+      `Budget!A${existing._rowIndex}:E${existing._rowIndex}`,
+      [[month, '', assigned, source, category_group]]
+    );
+  } else {
+    await client.appendValues(`Budget!A${ASSIGNMENTS_START_ROW + 1}`, [
+      [month, '', assigned, source, category_group],
     ]);
   }
 }
@@ -240,7 +316,7 @@ export async function fetchCategoryCalcs(
 }
 
 /**
- * Apply monthly template amounts for all categories that have one.
+ * Apply monthly template amounts for all categories and group budgets that have one.
  * Batches all writes into at most 3 API calls: one batchUpdateValues for
  * in-place updates, one appendValues for new rows, one appendValues for logs.
  */
@@ -248,12 +324,19 @@ export async function applyTemplate(
   client: SheetsClient,
   month: string,
   categories: BudgetCategory[],
-  existingAssignments: BudgetAssignment[]
+  existingAssignments: BudgetAssignment[],
+  groups: BudgetGroup[] = [],
+  existingGroupAssignments: GroupBudgetAssignment[] = []
 ): Promise<void> {
   const templateCats = categories.filter((c) => c.monthly_template_amount > 0);
-  if (templateCats.length === 0) return;
+  const templateGroups = groups.filter(
+    (g) => g.budget_type === 'by_group' && g.monthly_template_amount > 0
+  );
+
+  if (templateCats.length === 0 && templateGroups.length === 0) return;
 
   const assignMap = new Map(existingAssignments.map((a) => [a.category, a]));
+  const groupAssignMap = new Map(existingGroupAssignments.map((a) => [a.category_group, a]));
   const updateData: { range: string; values: unknown[][] }[] = [];
   const newRows: unknown[][] = [];
   const logRows: unknown[][] = [];
@@ -276,6 +359,23 @@ export async function applyTemplate(
     logRows.push([now, month, cat.category, delta, 'template', '']);
   }
 
+  // Group budget template amounts — written as blank-category assignment rows
+  for (const grp of templateGroups) {
+    const existing = groupAssignMap.get(grp.group_name);
+    const amount = grp.monthly_template_amount;
+
+    if (existing) {
+      updateData.push({
+        range: `Budget!A${existing._rowIndex}:E${existing._rowIndex}`,
+        values: [[month, '', amount, 'template', grp.group_name]],
+      });
+    } else {
+      newRows.push([month, '', amount, 'template', grp.group_name]);
+    }
+
+    logRows.push([now, month, `[group] ${grp.group_name}`, amount - (existing?.assigned ?? 0), 'template', '']);
+  }
+
   if (updateData.length > 0) await client.batchUpdateValues(updateData);
   if (newRows.length > 0) await client.appendValues(`Budget!A${ASSIGNMENTS_START_ROW + 1}`, newRows);
   if (logRows.length > 0) await client.appendValues('Budget_Log!A2', logRows);
@@ -286,14 +386,21 @@ export async function applyTemplate(
 /**
  * Merge categories, assignments, and pre-calculated calcs into a grouped budget view.
  * Activity and available come from Budget_Calcs (sheet-computed, includes rollover).
+ * Pass groups + groupAssignments + allCalcs to enable by_group budget calculations.
  * This is the primary data structure consumed by the Plan screen.
  */
 export function buildGroupedBudget(
   categories: BudgetCategory[],
   assignments: BudgetAssignment[],
-  calcMap: Map<string, CategoryCalcs>
+  calcMap: Map<string, CategoryCalcs>,
+  groups: BudgetGroup[] = [],
+  groupAssignments: GroupBudgetAssignment[] = [],
+  allCalcs: BudgetCalcEntry[] = [],
+  currentMonth = '',
 ): GroupedBudget[] {
   const assignMap = new Map(assignments.map((a) => [a.category, a.assigned]));
+  const groupMetaMap = new Map(groups.map((g) => [g.group_name, g]));
+  const groupAssignMap = new Map(groupAssignments.map((ga) => [ga.category_group, ga.assigned]));
 
   // Enrich categories with sheet-computed fields
   const enriched: CategoryWithActivity[] = categories.map((cat) => {
@@ -322,12 +429,44 @@ export function buildGroupedBudget(
     }));
 
     const allCats = subgroups.flatMap((s) => s.categories);
+    const totalAssigned = sum(allCats, 'assigned');
+    const totalActivity = sum(allCats, 'activity');
+    const totalAvailable = sum(allCats, 'available');
+
+    const meta = groupMetaMap.get(groupName);
+    const budgetType: GroupBudgetType = meta?.budget_type ?? 'by_category';
+    const rollover = meta?.rollover ?? false;
+    const rolloverStartMonth = meta?.rollover_start_month ?? '';
+    const groupAssigned = groupAssignMap.get(groupName) ?? 0;
+    const groupTemplateAmount = meta?.monthly_template_amount ?? 0;
+
+    let groupAvailable = totalAvailable;
+    if (budgetType === 'by_group') {
+      if (rollover && rolloverStartMonth && currentMonth) {
+        // Cumulative activity since rollover_start_month through current month
+        const catNames = new Set(allCats.map((c) => c.category));
+        const cumulativeActivity = allCalcs
+          .filter((c) => catNames.has(c.category) && c.month >= rolloverStartMonth && c.month <= currentMonth)
+          .reduce((s, c) => s + c.activity, 0);
+        groupAvailable = groupAssigned - cumulativeActivity;
+      } else {
+        // Simple: group budget minus this month's activity across all categories
+        groupAvailable = groupAssigned - totalActivity;
+      }
+    }
+
     result.push({
       groupName,
+      budgetType,
+      rollover,
+      rolloverStartMonth,
+      groupAssigned,
+      groupAvailable,
+      groupTemplateAmount,
       subgroups,
-      totalAssigned: sum(allCats, 'assigned'),
-      totalActivity: sum(allCats, 'activity'),
-      totalAvailable: sum(allCats, 'available'),
+      totalAssigned,
+      totalActivity,
+      totalAvailable,
     });
   }
 

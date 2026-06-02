@@ -136,11 +136,18 @@ export async function getSplitChildren(parentId: string): Promise<Transaction[]>
 }
 
 export async function getBudgetForMonth(month: string): Promise<GroupedBudget[]> {
-  const [categories, assignments, calcs] = await Promise.all([
+  const [categories, assignments, calcs, groups, groupAssignments] = await Promise.all([
     getActiveBudgetCategories(),
     getMonthAssignments(month),
     db.budgetCalcs.where('month').equals(month).toArray(),
+    db.budgetGroups.toArray(),
+    db.budgetGroupAssignments.where('month').equals(month).toArray(),
   ]);
   const calcMap = new Map(calcs.map((c) => [c.category, { activity: c.activity, available: c.available }]));
-  return buildGroupedBudget(categories, assignments, calcMap);
+
+  // Only fetch multi-month calcs when needed for rollover groups
+  const hasRolloverGroups = groups.some((g) => g.rollover && g.budget_type === 'by_group');
+  const allCalcs = hasRolloverGroups ? await db.budgetCalcs.toArray() : [];
+
+  return buildGroupedBudget(categories, assignments, calcMap, groups, groupAssignments, allCalcs, month);
 }

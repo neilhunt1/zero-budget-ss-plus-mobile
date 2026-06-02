@@ -156,7 +156,9 @@ vi.mock('../../src/api/budget', async (importOriginal) => {
     ...actual,
     fetchBudgetCategories: vi.fn(),
     fetchAllAssignments: vi.fn(),
+    fetchAllGroupAssignments: vi.fn(),
     fetchAllCategoryCalcEntries: vi.fn(),
+    fetchGroupMetadata: vi.fn(),
     fetchReadyToAssign: vi.fn(),
   };
 });
@@ -175,12 +177,14 @@ describe('IndexedDB sync pipeline @integration', () => {
   beforeEach(async () => {
     await resetDb();
     const { fetchTransactions } = await import('../../src/api/transactions');
-    const { fetchBudgetCategories, fetchAllAssignments, fetchAllCategoryCalcEntries, fetchReadyToAssign } =
+    const { fetchBudgetCategories, fetchAllAssignments, fetchAllGroupAssignments, fetchAllCategoryCalcEntries, fetchGroupMetadata, fetchReadyToAssign } =
       await import('../../src/api/budget');
     vi.mocked(fetchTransactions).mockResolvedValue(MOCK_TRANSACTIONS);
     vi.mocked(fetchBudgetCategories).mockResolvedValue(MOCK_CATEGORIES);
     vi.mocked(fetchAllAssignments).mockResolvedValue(MOCK_ASSIGNMENTS);
+    vi.mocked(fetchAllGroupAssignments).mockResolvedValue([]);
     vi.mocked(fetchAllCategoryCalcEntries).mockResolvedValue(MOCK_CALCS);
+    vi.mocked(fetchGroupMetadata).mockResolvedValue([]);
     vi.mocked(fetchReadyToAssign).mockResolvedValue(500);
   });
   afterEach(() => vi.clearAllMocks());

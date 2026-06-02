@@ -48,6 +48,13 @@ vi.mock('../../src/db/schema', () => ({
       put: (...args: unknown[]) => mockDbAssignmentsPut(...args),
       bulkPut: (...args: unknown[]) => mockDbAssignmentsBulkPut(...args),
     },
+    budgetGroupAssignments: {
+      where: () => ({ equals: () => ({ toArray: () => Promise.resolve([]) }) }),
+      put: vi.fn().mockResolvedValue(undefined),
+    },
+    budgetGroups: {
+      toArray: () => Promise.resolve([]),
+    },
   },
 }));
 
@@ -96,6 +103,12 @@ function makeCat(overrides: Partial<CategoryWithActivity> = {}): CategoryWithAct
 function makeGroupedBudget(cats: CategoryWithActivity[] = [makeCat()]): GroupedBudget[] {
   return [{
     groupName: 'Food',
+    budgetType: 'by_category',
+    rollover: false,
+    rolloverStartMonth: '',
+    groupAssigned: 0,
+    groupAvailable: cats.reduce((s, c) => s + c.available, 0),
+    groupTemplateAmount: 0,
     subgroups: [{ subgroupName: '', categories: cats }],
     totalAssigned: cats.reduce((s, c) => s + c.assigned, 0),
     totalActivity: cats.reduce((s, c) => s + c.activity, 0),
@@ -373,7 +386,9 @@ describe('Plan screen — apply template', () => {
       expect.anything(),
       expect.any(String),
       cats,
-      existing
+      existing,
+      expect.any(Array), // groups
+      expect.any(Array)  // groupAssignments
     );
   });
 
@@ -388,7 +403,7 @@ describe('Plan screen — apply template', () => {
     await waitFor(() => expect(btn).not.toBeDisabled());
     fireEvent.click(btn);
 
-    expect(window.confirm).toHaveBeenCalled();
+    await waitFor(() => expect(window.confirm).toHaveBeenCalled());
     expect(mockApplyTemplate).not.toHaveBeenCalled();
   });
 
@@ -425,6 +440,12 @@ describe('Plan screen — move money', () => {
   function makeGroupedBudgetTwo(dest: CategoryWithActivity, source: CategoryWithActivity): GroupedBudget[] {
     return [{
       groupName: 'Food',
+      budgetType: 'by_category',
+      rollover: false,
+      rolloverStartMonth: '',
+      groupAssigned: 0,
+      groupAvailable: dest.available + source.available,
+      groupTemplateAmount: 0,
       subgroups: [{ subgroupName: '', categories: [dest, source] }],
       totalAssigned: dest.assigned + source.assigned,
       totalActivity: dest.activity + source.activity,
@@ -486,6 +507,8 @@ describe('Plan screen — move money', () => {
     const fluidCat = makeSourceCat({ category: 'Dining Out', category_type: 'fluid', available: 10 });
     mockGetBudgetForMonth.mockResolvedValue([{
       groupName: 'Mixed',
+      budgetType: 'by_category', rollover: false, rolloverStartMonth: '',
+      groupAssigned: 0, groupAvailable: 0, groupTemplateAmount: 0,
       subgroups: [{ subgroupName: '', categories: [destCat, fixedCat, fluidCat] }],
       totalAssigned: 0, totalActivity: 0, totalAvailable: 0,
     }]);
@@ -662,6 +685,8 @@ describe('Plan screen — move money', () => {
     const negCat = makeSourceCat({ category: 'Gas', available: -20, assigned: 30 });
     mockGetBudgetForMonth.mockResolvedValue([{
       groupName: 'Food',
+      budgetType: 'by_category', rollover: false, rolloverStartMonth: '',
+      groupAssigned: 0, groupAvailable: 0, groupTemplateAmount: 0,
       subgroups: [{ subgroupName: '', categories: [destCat, sourceCat, zeroCat, negCat] }],
       totalAssigned: 0, totalActivity: 0, totalAvailable: 0,
     }]);

@@ -3,6 +3,7 @@
 export type TransactionStatus = 'cleared' | 'pending' | 'manual';
 export type TransactionType = 'income' | 'transfer' | 'credit_payment' | 'regular';
 export type CategoryType = 'fluid' | 'fixed_bill' | 'savings_target';
+export type GroupBudgetType = 'by_category' | 'by_group';
 
 // ─── Core Domain Types ─────────────────────────────────────────────────────────
 
@@ -56,6 +57,25 @@ export interface BudgetAssignment {
   _rowIndex: number;
 }
 
+/** Per-group budget allocation for a single month (category left blank in sheet). */
+export interface GroupBudgetAssignment {
+  month: string; // YYYY-MM
+  category_group: string;
+  assigned: number;
+  source: string; // 'manual'
+  _rowIndex: number;
+}
+
+/** Group-level budget settings from the Groups tab. */
+export interface BudgetGroup {
+  group_name: string;
+  budget_type: GroupBudgetType;
+  rollover: boolean;
+  rollover_start_month: string; // YYYY-MM or '' if no rollover
+  monthly_template_amount: number; // 0 = no group template; Apply Template will write this as the group budget
+  _rowIndex: number;
+}
+
 export interface Template {
   template_id: string;
   parent_id: string;
@@ -96,6 +116,15 @@ export interface CategoryWithActivity extends BudgetCategory {
 /** Budget view for a single month, grouped for rendering. */
 export interface GroupedBudget {
   groupName: string;
+  budgetType: GroupBudgetType;
+  rollover: boolean;
+  rolloverStartMonth: string; // YYYY-MM or ''
+  /** For by_group: the group-level assignment amount. Zero for by_category groups. */
+  groupAssigned: number;
+  /** Monthly template amount from the Groups tab. Zero if no template set. */
+  groupTemplateAmount: number;
+  /** For by_group: remaining budget (considers rollover). Equals totalAvailable for by_category. */
+  groupAvailable: number;
   subgroups: Array<{
     subgroupName: string;
     categories: CategoryWithActivity[];

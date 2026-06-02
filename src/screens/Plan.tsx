@@ -5,6 +5,7 @@ import { useMediaQuery } from '../hooks/useMediaQuery';
 import { SheetsClient, AuthError } from '../api/client';
 import {
   upsertAssignment,
+  upsertGroupAssignment,
   appendLogEntry,
   applyTemplate,
   batchUpsertAssignments,
@@ -13,7 +14,7 @@ import {
 import { db } from '../db/schema';
 import { getBudgetForMonth, getMonthAssignments, getActiveBudgetCategories, getAvgDailyIncome } from '../db/queries';
 import { refreshMonthBudget } from '../db/sync';
-import { GroupedBudget, BudgetAssignment, BudgetCategory, CategoryWithActivity } from '../types';
+import { GroupedBudget, BudgetAssignment, BudgetCategory, CategoryWithActivity, GroupBudgetAssignment } from '../types';
 import RunwayBar from '../components/RunwayBar';
 
 const SHEET_ID = import.meta.env.VITE_GOOGLE_SHEET_ID as string;
@@ -29,6 +30,21 @@ function fmt(n: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   });
+}
+
+function groupProgressPct(assigned: number, available: number): number {
+  if (assigned <= 0) return 0;
+  return Math.min(100, Math.max(0, ((assigned - available) / assigned) * 100));
+}
+
+function rolloverPeriodLabel(startMonth: string, currentMonth: string): string {
+  if (!startMonth) return '';
+  const [startYear, startMo] = startMonth.split('-').map(Number);
+  const [endYear, endMo] = currentMonth.split('-').map(Number);
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const start = monthNames[(startMo - 1) % 12];
+  const end = monthNames[(endMo - 1) % 12];
+  return startYear === endYear ? `${start}–${end}` : `${start} ${startYear}–${end} ${endYear}`;
 }
 
 interface EditState {
@@ -50,10 +66,19 @@ interface MoveMoneyState {
   saveError: string | null;
 }
 
+interface EditGroupState {
+  group: GroupedBudget;
+  existing: GroupBudgetAssignment | undefined;
+  inputValue: string;
+  saving: boolean;
+  saveError: string | null;
+}
+
 export default function Plan() {
   const { token, notifySessionExpired } = useAuth();
   const [month, setMonth] = useState(() => toYYYYMM(new Date()));
   const [editState, setEditState] = useState<EditState | null>(null);
+  const [editGroupState, setEditGroupState] = useState<EditGroupState | null>(null);
   const [moveMoneyState, setMoveMoneyState] = useState<MoveMoneyState | null>(null);
   const [applyingTemplate, setApplyingTemplate] = useState(false);
   const [writeError, setWriteError] = useState<string | null>(null);
@@ -62,6 +87,7 @@ export default function Plan() {
 
   const groups = useLiveQuery(() => getBudgetForMonth(month), [month]) as GroupedBudget[] | undefined;
   const assignments = useLiveQuery(() => getMonthAssignments(month), [month]) as BudgetAssignment[] | undefined;
+  const groupAssignments = useLiveQuery(() => db.budgetGroupAssignments.where('month').equals(month).toArray(), [month]) as GroupBudgetAssignment[] | undefined;
   const categories = useLiveQuery(() => getActiveBudgetCategories()) as BudgetCategory[] | undefined;
   const syncMeta = useLiveQuery(() => db.syncMeta.get('all'));
   const avgDailyIncome = (useLiveQuery(() => getAvgDailyIncome(90)) as number | undefined) ?? 0;
@@ -99,13 +125,54 @@ export default function Plan() {
     });
   };
 
+  const handleGroupHeaderClick = (group: GroupedBudget) => {
+    if (group.budgetType !== 'by_group') return;
+    const existing = (groupAssignments ?? []).find((a) => a.category_group === group.groupName);
+    setEditGroupState({
+      group,
+      existing,
+      inputValue: group.groupAssigned === 0 ? '' : String(group.groupAssigned),
+      saving: false,
+      saveError: null,
+    });
+  };
+
+  const handleGroupSave = async () => {
+    if (!editGroupState || !token) return;
+    const amount = parseFloat(editGroupState.inputValue) || 0;
+    const { group, existing } = editGroupState;
+    setEditGroupState((prev) => prev ? { ...prev, saving: true, saveError: null } : null);
+    try {
+      const client = new SheetsClient(SHEET_ID, token);
+      await upsertGroupAssignment(client, month, group.groupName, amount, existing);
+      setEditGroupState(null);
+      await db.budgetGroupAssignments.put({
+        month,
+        category_group: group.groupName,
+        assigned: amount,
+        source: 'manual',
+        _rowIndex: existing?._rowIndex ?? 0,
+      });
+    } catch (e) {
+      if (e instanceof AuthError) { notifySessionExpired(); return; }
+      setEditGroupState((prev) =>
+        prev ? { ...prev, saving: false, saveError: (e as Error).message } : null
+      );
+    }
+  };
+
   const handleCancel = () => setEditState(null);
 
   const handleApplyTemplate = async () => {
     if (!token || !categories) return;
-    if (categories.every((c) => c.monthly_template_amount === 0)) return;
+    const budgetGroups = await db.budgetGroups.toArray();
+    const hasTemplateCats = categories.some((c) => c.monthly_template_amount > 0);
+    const hasTemplateGroups = budgetGroups.some(
+      (g) => g.budget_type === 'by_group' && g.monthly_template_amount > 0
+    );
+    if (!hasTemplateCats && !hasTemplateGroups) return;
 
-    if ((assignments ?? []).length > 0) {
+    if ((assignments ?? []).length > 0 || (groupAssignments ?? []).length > 0) {
       const ok = window.confirm('This will overwrite existing assignments. Continue?');
       if (!ok) return;
     }
@@ -114,7 +181,7 @@ export default function Plan() {
     setWriteError(null);
     try {
       const client = new SheetsClient(SHEET_ID, token);
-      await applyTemplate(client, month, categories, assignments ?? []);
+      await applyTemplate(client, month, categories, assignments ?? [], budgetGroups, groupAssignments ?? []);
       // Brief pause: lets Google Sheets finish recalculating SUMIFS formulas
       // in Budget_Calcs before we read them back.
       await new Promise((r) => setTimeout(r, 800));
@@ -267,7 +334,10 @@ export default function Plan() {
           type="button"
           className="btn-secondary apply-template-btn"
           onClick={handleApplyTemplate}
-          disabled={applyingTemplate || loading || (categories ?? []).every((c) => c.monthly_template_amount === 0)}
+          disabled={applyingTemplate || loading || (
+            (categories ?? []).every((c) => c.monthly_template_amount === 0) &&
+            (groups ?? []).every((g) => g.groupTemplateAmount === 0)
+          )}
         >
           {applyingTemplate ? 'Applying…' : 'Apply Template'}
         </button>
@@ -314,19 +384,25 @@ export default function Plan() {
           <div className={isDesktop ? 'plan-desktop-body' : undefined}>
             {isDesktop && (
               <div className="plan-group-sidebar">
-                {(groups ?? []).map((g) => (
-                  <button
-                    key={g.groupName}
-                    type="button"
-                    className={`plan-group-tab${selectedGroup === g.groupName ? ' active' : ''}`}
-                    onClick={() => setSelectedGroup(g.groupName)}
-                  >
-                    <span className="plan-group-tab-name">{g.groupName}</span>
-                    <span className={`plan-group-tab-total${g.totalAvailable < 0 ? ' negative' : ''}`}>
-                      {fmt(g.totalAvailable)}
-                    </span>
-                  </button>
-                ))}
+                {(groups ?? []).map((g) => {
+                  const displayAvail = g.budgetType === 'by_group' ? g.groupAvailable : g.totalAvailable;
+                  return (
+                    <button
+                      key={g.groupName}
+                      type="button"
+                      className={`plan-group-tab${selectedGroup === g.groupName ? ' active' : ''}`}
+                      onClick={() => setSelectedGroup(g.groupName)}
+                    >
+                      <span className="plan-group-tab-name">{g.groupName}</span>
+                      {g.budgetType === 'by_group' && (
+                        <span className="plan-group-tab-badge">G</span>
+                      )}
+                      <span className={`plan-group-tab-total${displayAvail < 0 ? ' negative' : ''}`}>
+                        {fmt(displayAvail)}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             )}
 
@@ -345,8 +421,39 @@ export default function Plan() {
                   {!isDesktop && (
                     <div className="group-header">
                       <span className="group-name">{group.groupName}</span>
-                      <span className="col-num group-total">{fmt(group.totalAvailable)}</span>
+                      {group.budgetType === 'by_group' ? (
+                        <span className={`col-num group-total${group.groupAvailable < 0 ? ' negative' : ''}`}>
+                          {fmt(group.groupAvailable)}
+                        </span>
+                      ) : (
+                        <span className="col-num group-total">{fmt(group.totalAvailable)}</span>
+                      )}
                     </div>
+                  )}
+
+                  {/* Group envelope row — by_group only. Tapping sets the group budget. */}
+                  {group.budgetType === 'by_group' && (
+                    <button
+                      type="button"
+                      className={`budget-row budget-row--group-envelope${group.groupAvailable < 0 ? ' overspent' : ''}`}
+                      onClick={() => handleGroupHeaderClick(group)}
+                    >
+                      <span className="col-name">
+                        Group Envelope
+                        {group.rollover && group.rolloverStartMonth && (
+                          <span className="group-envelope-period">
+                            {' '}({rolloverPeriodLabel(group.rolloverStartMonth, month)})
+                          </span>
+                        )}
+                      </span>
+                      <span className="col-num">
+                        {group.groupAssigned > 0 ? fmt(group.groupAssigned) : <span className="group-envelope-unset">tap to set</span>}
+                      </span>
+                      <span className="col-num">{fmt(group.totalActivity)}</span>
+                      <span className={`col-num${group.groupAvailable < 0 ? ' negative' : ''}`}>
+                        {fmt(group.groupAvailable)}
+                      </span>
+                    </button>
                   )}
 
                   {group.subgroups.map(({ subgroupName, categories: cats }) => (
@@ -355,20 +462,37 @@ export default function Plan() {
                         <div className="subgroup-header">{subgroupName}</div>
                       )}
                       {cats.map((cat) => (
-                        <button
-                          key={cat.category}
-                          type="button"
-                          className={`budget-row${cat.available < 0 ? ' overspent' : ''}`}
-                          data-testid="budget-row"
-                          onClick={() => handleRowClick(cat)}
-                        >
-                          <span className="col-name">{cat.category}</span>
-                          <span className="col-num">{fmt(cat.assigned)}</span>
-                          <span className="col-num">{fmt(cat.activity)}</span>
-                          <span className={`col-num${cat.available < 0 ? ' negative' : ''}`}>
-                            {fmt(cat.available)}
-                          </span>
-                        </button>
+                        group.budgetType === 'by_group' ? (
+                          // by_group: actuals only — individual category over/underspend is informational
+                          <button
+                            key={cat.category}
+                            type="button"
+                            className="budget-row budget-row--actuals-only"
+                            data-testid="budget-row"
+                            onClick={() => handleRowClick(cat)}
+                          >
+                            <span className="col-name">{cat.category}</span>
+                            <span className="col-num" />
+                            <span className="col-num">{fmt(cat.activity)}</span>
+                            <span className="col-num" />
+                          </button>
+                        ) : (
+                          // by_category: existing behaviour
+                          <button
+                            key={cat.category}
+                            type="button"
+                            className={`budget-row${cat.available < 0 ? ' overspent' : ''}`}
+                            data-testid="budget-row"
+                            onClick={() => handleRowClick(cat)}
+                          >
+                            <span className="col-name">{cat.category}</span>
+                            <span className="col-num">{fmt(cat.assigned)}</span>
+                            <span className="col-num">{fmt(cat.activity)}</span>
+                            <span className={`col-num${cat.available < 0 ? ' negative' : ''}`}>
+                              {fmt(cat.available)}
+                            </span>
+                          </button>
+                        )
                       ))}
                     </div>
                   ))}
@@ -459,6 +583,51 @@ export default function Plan() {
             <button type="button" className="picker-cancel" onClick={handleMoveMoneyCancel}>
               Cancel
             </button>
+          </div>
+        </div>
+      )}
+
+      {editGroupState && (
+        <div className="assign-overlay" onClick={() => setEditGroupState(null)}>
+          <div className="assign-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="assign-sheet-handle" />
+            <div className="assign-sheet-title">{editGroupState.group.groupName}</div>
+            <div className="assign-sheet-subtitle">Group budget for {month}</div>
+            <label className="assign-label" htmlFor="assign-group-input">Budget amount</label>
+            <input
+              id="assign-group-input"
+              className="assign-input"
+              type="number"
+              inputMode="decimal"
+              value={editGroupState.inputValue}
+              onChange={(e) =>
+                setEditGroupState((prev) => prev ? { ...prev, inputValue: e.target.value } : null)
+              }
+              placeholder="0"
+              // eslint-disable-next-line jsx-a11y/no-autofocus
+              autoFocus
+            />
+            {editGroupState.saveError && (
+              <div className="assign-save-error">{editGroupState.saveError}</div>
+            )}
+            <div className="assign-sheet-actions">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setEditGroupState(null)}
+                disabled={editGroupState.saving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={handleGroupSave}
+                disabled={editGroupState.saving}
+              >
+                {editGroupState.saving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
           </div>
         </div>
       )}
