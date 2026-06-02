@@ -136,8 +136,8 @@ const MOCK_CATEGORIES = [
 ];
 
 const MOCK_ASSIGNMENTS = [
-  { month: '2025-04', category: 'Groceries 🛒', assigned: 400, source: 'manual' as const, _rowIndex: 509 },
-  { month: '2025-04', category: 'Fuel ⛽', assigned: 120, source: 'manual' as const, _rowIndex: 510 },
+  { month: '2025-04', category: 'Groceries 🛒', assigned: 400, source: 'manual' as const, _rowIndex: 2 },
+  { month: '2025-04', category: 'Fuel ⛽', assigned: 120, source: 'manual' as const, _rowIndex: 3 },
 ];
 
 const MOCK_CALCS = [

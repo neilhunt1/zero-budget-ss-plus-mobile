@@ -13,11 +13,12 @@ const CATEGORY_COLS = [
 ] as const;
 
 // Must match BUDGET_ASSIGNMENTS_START_ROW in setup-sheet.ts.
-// Row 508 = header; data starts at row 509.
-const ASSIGNMENTS_START_ROW = 508;
+// Row 1 = header; data starts at row 2.
+const ASSIGNMENTS_START_ROW = 1;
 
-// Must match BUDGET_CATEGORIES_START_ROW / BUDGET_CATEGORIES_END_ROW in setup-sheet.ts.
-const CATEGORIES_START_ROW = 7;
+// Must match CATEGORIES_START_ROW / CATEGORIES_END_ROW in setup-sheet.ts.
+// Categories now live in the dedicated Categories tab (row 1 = header, rows 2+ = data).
+const CATEGORIES_START_ROW = 2;
 const CATEGORIES_END_ROW = 506;
 
 // ─── Parse helpers ─────────────────────────────────────────────────────────────
@@ -40,11 +41,11 @@ function parseCategoryRow(row: string[], rowIndex: number): BudgetCategory {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Fetch the Ready to Assign balance from Budget!B1 (the sheet formula).
+ * Fetch the Ready to Assign balance from Dashboard!B1 (the sheet formula).
  * The sheet formula is authoritative — it spans all months and transactions.
  */
 export async function fetchReadyToAssign(client: SheetsClient): Promise<number> {
-  const res = await client.getValues('Budget!B1');
+  const res = await client.getValues('Dashboard!B1');
   const raw = (res.values?.[0]?.[0] ?? '0').toString().replace(/^'/, '');
   return parseFloat(raw) || 0;
 }
@@ -57,7 +58,7 @@ export async function fetchBudgetCategories(
   client: SheetsClient,
   { activeOnly = true }: { activeOnly?: boolean } = {}
 ): Promise<BudgetCategory[]> {
-  const res = await client.getValues(`Budget!A${CATEGORIES_START_ROW}:G${CATEGORIES_END_ROW}`);
+  const res = await client.getValues(`Categories!A${CATEGORIES_START_ROW}:G${CATEGORIES_END_ROW}`);
   const rows = res.values ?? [];
   return rows
     .map((row, i) => parseCategoryRow(row, i + CATEGORIES_START_ROW))

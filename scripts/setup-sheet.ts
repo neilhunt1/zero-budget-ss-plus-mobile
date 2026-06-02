@@ -94,17 +94,16 @@ const BUDGET_CATEGORY_COLUMNS = [
   "active",
 ];
 
-// Budget tab layout:
-//   Rows 1–5:   Dashboard header (ReadyToAssign, LastYnabSync, etc.)
-//   Row 6:      Category column headers
-//   Rows 7–506: Category data (500 rows reserved)
-//   Row 507:    "── Monthly Assignments ──" section label
-//   Row 508:    Assignment column headers
-//   Rows 509+:  Assignment data rows
-const BUDGET_CATEGORIES_HEADER_ROW = 6;
-const BUDGET_CATEGORIES_START_ROW = 7;
-const BUDGET_CATEGORIES_END_ROW = 506;
-const BUDGET_ASSIGNMENTS_START_ROW = 508; // header row; data starts at 509
+// Categories tab layout (new in v7):
+//   Row 1:      Column headers (category_group, category_subgroup, ...)
+//   Rows 2–506: Category data (500 rows reserved)
+const CATEGORIES_START_ROW = 2;
+const CATEGORIES_END_ROW = 506;
+
+// Budget tab layout (new in v7 — assignments only):
+//   Row 1:      Column headers (month, category, assigned, source, category_group)
+//   Rows 2+:    Assignment data (grows indefinitely)
+const BUDGET_ASSIGNMENTS_START_ROW = 1; // header row; data starts at row 2
 const BUDGET_ASSIGNMENTS_COLUMNS = ["month", "category", "assigned", "source", "category_group"];
 
 const GROUPS_COLUMNS = ["group_name", "budget_type", "rollover", "rollover_start_month", "monthly_template_amount"];
@@ -134,6 +133,8 @@ const BUDGET_LOG_COLUMNS = [
 const TABS_IN_ORDER = [
   "Transactions",
   "Budget",
+  "Categories",
+  "Dashboard",
   "Groups",
   "Templates",
   "Reflect",
@@ -155,7 +156,7 @@ const HEADER_BG_COLOR = { red: 0.29, green: 0.525, blue: 0.91 };
 const HEADER_FG_COLOR = { red: 1, green: 1, blue: 1 };
 
 // Sheet schema version — increment when structure changes
-const SHEET_VERSION = 6;
+const SHEET_VERSION = 7;
 
 // ─── Environment Loading ───────────────────────────────────────────────────────
 
@@ -369,19 +370,19 @@ async function writeHeaders(
   sheetId: string,
   sheetMeta: sheets_v4.Schema$Sheet[]
 ): Promise<void> {
-  // Check existing header row for each tab that gets column headers.
-  // Budget category header lives at row BUDGET_CATEGORIES_HEADER_ROW (not row 1).
-  const tabHeaders: Array<{ title: string; columns: string[]; headerRow: number }> = [
-    { title: "Transactions", columns: TRANSACTIONS_COLUMNS, headerRow: 1 },
-    { title: "Budget", columns: BUDGET_CATEGORY_COLUMNS, headerRow: BUDGET_CATEGORIES_HEADER_ROW },
-    { title: "Groups", columns: GROUPS_COLUMNS, headerRow: 1 },
-    { title: "Templates", columns: TEMPLATES_COLUMNS, headerRow: 1 },
-    { title: "Budget_Log", columns: BUDGET_LOG_COLUMNS, headerRow: 1 },
+  // All tabs below use row 1 as their header row.
+  const tabHeaders: Array<{ title: string; columns: string[] }> = [
+    { title: "Transactions", columns: TRANSACTIONS_COLUMNS },
+    { title: "Budget", columns: BUDGET_ASSIGNMENTS_COLUMNS },
+    { title: "Categories", columns: BUDGET_CATEGORY_COLUMNS },
+    { title: "Groups", columns: GROUPS_COLUMNS },
+    { title: "Templates", columns: TEMPLATES_COLUMNS },
+    { title: "Budget_Log", columns: BUDGET_LOG_COLUMNS },
   ];
 
   const formatRequests: sheets_v4.Schema$Request[] = [];
 
-  for (const { title, columns, headerRow } of tabHeaders) {
+  for (const { title, columns } of tabHeaders) {
     const meta = findSheet(sheetMeta, title);
     if (!meta) continue;
 
@@ -389,44 +390,39 @@ async function writeHeaders(
 
     const existing = await sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
-      range: `${title}!${headerRow}:${headerRow}`,
+      range: `${title}!1:1`,
     });
 
     const currentValues = existing.data.values?.[0] ?? [];
 
     // Compare actual content against the expected column names — not just presence.
-    // An earlier provisioning could have left category *data* at the header row
-    // (e.g. Budget!A6 when CATEGORIES_START_ROW was 6); checking length>0 would
-    // wrongly skip writing the real column headers in that case.
     const headersCorrect =
       currentValues.length >= columns.length &&
       columns.every((col, i) => currentValues[i]?.trim() === col.trim());
 
     if (headersCorrect) {
-      log(`Headers: ${title} row ${headerRow} already correct, skipping`);
+      log(`Headers: ${title} row 1 already correct, skipping`);
     } else {
       if (currentValues.length > 0) {
-        log(`Headers: ${title} row ${headerRow} has stale/incorrect content — overwriting with column headers`);
+        log(`Headers: ${title} row 1 has stale/incorrect content — overwriting with column headers`);
       }
       await sheets.spreadsheets.values.update({
         spreadsheetId: sheetId,
-        range: `${title}!A${headerRow}`,
+        range: `${title}!A1`,
         valueInputOption: "RAW",
         requestBody: { values: [columns] },
       });
-      log(`Headers: wrote ${columns.length} columns to ${title} row ${headerRow}`);
+      log(`Headers: wrote ${columns.length} columns to ${title} row 1`);
     }
 
-    const frozenRows = title === "Budget" ? BUDGET_CATEGORIES_HEADER_ROW : 1;
-
-    // Format header row: bold, background color
+    // Format header row: bold, background color, freeze row 1
     formatRequests.push(
       {
         repeatCell: {
           range: {
             sheetId: tabSheetId,
-            startRowIndex: headerRow - 1,
-            endRowIndex: headerRow,
+            startRowIndex: 0,
+            endRowIndex: 1,
           },
           cell: {
             userEnteredFormat: {
@@ -444,67 +440,12 @@ async function writeHeaders(
         updateSheetProperties: {
           properties: {
             sheetId: tabSheetId,
-            gridProperties: { frozenRowCount: frozenRows },
+            gridProperties: { frozenRowCount: 1 },
           },
           fields: "gridProperties.frozenRowCount",
         },
       }
     );
-  }
-
-  // Write Budget monthly assignments header at BUDGET_ASSIGNMENTS_START_ROW
-  // Uses same content-comparison logic as other tab headers so new columns are picked up.
-  const budgetMeta = findSheet(sheetMeta, "Budget");
-  if (budgetMeta) {
-    const existingAssign = await sheets.spreadsheets.values.get({
-      spreadsheetId: sheetId,
-      range: `Budget!A${BUDGET_ASSIGNMENTS_START_ROW}:E${BUDGET_ASSIGNMENTS_START_ROW}`,
-    });
-    const assignHeaderValues = existingAssign.data.values?.[0] ?? [];
-    const assignHeaderCorrect =
-      assignHeaderValues.length >= BUDGET_ASSIGNMENTS_COLUMNS.length &&
-      BUDGET_ASSIGNMENTS_COLUMNS.every((col, i) => assignHeaderValues[i]?.trim() === col.trim());
-
-    if (!assignHeaderCorrect) {
-      if (assignHeaderValues.length > 0) {
-        log(`Headers: Budget assignments header row ${BUDGET_ASSIGNMENTS_START_ROW} has stale/incorrect content — overwriting`);
-      }
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: sheetId,
-        range: `Budget!A${BUDGET_ASSIGNMENTS_START_ROW}`,
-        valueInputOption: "RAW",
-        requestBody: { values: [BUDGET_ASSIGNMENTS_COLUMNS] },
-      });
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: sheetId,
-        range: `Budget!A${BUDGET_ASSIGNMENTS_START_ROW - 1}`,
-        valueInputOption: "RAW",
-        requestBody: { values: [["── Monthly Assignments ──"]] },
-      });
-      log(`Headers: wrote monthly assignments header to Budget row ${BUDGET_ASSIGNMENTS_START_ROW}`);
-
-      formatRequests.push({
-        repeatCell: {
-          range: {
-            sheetId: budgetMeta.properties?.sheetId!,
-            startRowIndex: BUDGET_ASSIGNMENTS_START_ROW - 1,
-            endRowIndex: BUDGET_ASSIGNMENTS_START_ROW,
-          },
-          cell: {
-            userEnteredFormat: {
-              backgroundColor: HEADER_BG_COLOR,
-              textFormat: {
-                foregroundColor: HEADER_FG_COLOR,
-                bold: true,
-              },
-            },
-          },
-          fields: "userEnteredFormat(backgroundColor,textFormat)",
-        },
-      });
-    } else {
-      log("Headers: Budget monthly assignments already correct, skipping");
-    }
   }
 
   if (formatRequests.length > 0) {
@@ -663,9 +604,9 @@ async function applyConditionalFormatting(
   log("Conditional formatting: applied to Transactions tab (status + category columns)");
 }
 
-// ─── Step: Seed Budget Categories ─────────────────────────────────────────────
+// ─── Step: Seed Categories tab ────────────────────────────────────────────────
 //
-// Strategy: clear rows 2–501 and rewrite from categories.json on every run.
+// Strategy: clear rows 2–501 of the Categories tab and rewrite from categories.json.
 // Before clearing, we check for categories that existed in the sheet but were
 // removed from categories.json. If any are referenced by transactions they are
 // archived (active:false) rather than deleted — preserving historical data
@@ -676,10 +617,10 @@ async function seedBudgetCategories(
   sheetId: string,
   newCategories: FlatCategory[]
 ): Promise<void> {
-  // ── 1. Read current Budget category rows to detect removals ──────────────────
+  // ── 1. Read current Categories tab rows to detect removals ───────────────────
   const existingRes = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: `Budget!A${BUDGET_CATEGORIES_START_ROW}:G${BUDGET_CATEGORIES_END_ROW}`,
+    range: `Categories!A${CATEGORIES_START_ROW}:G${CATEGORIES_END_ROW}`,
   });
   const existingRows = existingRes.data.values ?? [];
 
@@ -719,16 +660,16 @@ async function seedBudgetCategories(
         sort_order: parseInt(row[5]) || 9999,
         active: false,
       });
-      log(`Budget seed: ⚠  archived "${name}" — ${reason}`);
+      log(`Categories seed: ⚠  archived "${name}" — ${reason}`);
     } else {
-      log(`Budget seed: removed "${name}" — ${reason}`);
+      log(`Categories seed: removed "${name}" — ${reason}`);
     }
   }
 
   // ── 5. Clear category rows and rewrite: active categories + archived ones ────
   await sheets.spreadsheets.values.clear({
     spreadsheetId: sheetId,
-    range: `Budget!A${BUDGET_CATEGORIES_START_ROW}:G${BUDGET_CATEGORIES_END_ROW}`,
+    range: `Categories!A${CATEGORIES_START_ROW}:G${CATEGORIES_END_ROW}`,
   });
 
   const allRows = [...newCategories, ...toArchive].map((c) => [
@@ -743,7 +684,7 @@ async function seedBudgetCategories(
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId,
-    range: `Budget!A${BUDGET_CATEGORIES_START_ROW}`,
+    range: `Categories!A${CATEGORIES_START_ROW}`,
     valueInputOption: "RAW",
     requestBody: { values: allRows },
   });
@@ -751,16 +692,16 @@ async function seedBudgetCategories(
   const archivedCount = toArchive.length;
   const removedCount = removedRows.length - archivedCount;
   log(
-    `Budget seed: wrote ${newCategories.length} active` +
+    `Categories seed: wrote ${newCategories.length} active` +
     (archivedCount ? `, ${archivedCount} archived` : "") +
     (removedCount ? `, ${removedCount} removed` : "") +
     " categories"
   );
 }
 
-// ─── Step: Lock Budget category rows ─────────────────────────────────────────
+// ─── Step: Lock Categories tab ───────────────────────────────────────────────
 //
-// Protect rows 2–501 of the Budget tab with a warning. The edit path for
+// Protect the entire Categories tab with a warning. The edit path for
 // categories is categories.json + re-run setup, not direct sheet editing.
 
 async function lockBudgetCategories(
@@ -768,12 +709,11 @@ async function lockBudgetCategories(
   sheetId: string,
   sheetMeta: sheets_v4.Schema$Sheet[]
 ): Promise<void> {
-  const meta = findSheet(sheetMeta, "Budget");
+  const meta = findSheet(sheetMeta, "Categories");
   if (!meta) return;
 
   const tabSheetId = meta.properties?.sheetId!;
 
-  // Check if a protection already covers the category rows range
   const spreadsheet = await sheets.spreadsheets.get({
     spreadsheetId: sheetId,
     fields: "sheets(protectedRanges)",
@@ -783,16 +723,15 @@ async function lockBudgetCategories(
     (s) => s.protectedRanges ?? []
   ) ?? [];
 
-  // Row indices are 0-based: rows 7–506 → startRowIndex=6, endRowIndex=506
+  // Check if the whole Categories tab is already protected (no row range = whole sheet)
   const alreadyLocked = allProtected.some(
     (p) =>
       p.range?.sheetId === tabSheetId &&
-      p.range?.startRowIndex === BUDGET_CATEGORIES_START_ROW - 1 &&
-      p.range?.endRowIndex === BUDGET_CATEGORIES_END_ROW
+      p.range?.startRowIndex == null
   );
 
   if (alreadyLocked) {
-    log(`Lock: Budget category rows already protected, skipping`);
+    log("Lock: Categories tab already protected, skipping");
     return;
   }
 
@@ -803,11 +742,7 @@ async function lockBudgetCategories(
         {
           addProtectedRange: {
             protectedRange: {
-              range: {
-                sheetId: tabSheetId,
-                startRowIndex: BUDGET_CATEGORIES_START_ROW - 1,  // row 7 (0-based = 6)
-                endRowIndex: BUDGET_CATEGORIES_END_ROW,           // row 506 inclusive
-              },
+              range: { sheetId: tabSheetId },
               description: "Managed by categories.json — edit there and re-run setup, not here",
               warningOnly: true,
             },
@@ -817,7 +752,7 @@ async function lockBudgetCategories(
     },
   });
 
-  log(`Lock: Budget category rows ${BUDGET_CATEGORIES_START_ROW}–${BUDGET_CATEGORIES_END_ROW} protected (warn on edit)`);
+  log("Lock: Categories tab protected (warn on edit)");
 }
 
 // ─── Step: Lock BankToSheets-managed tabs ─────────────────────────────────────
@@ -916,38 +851,41 @@ async function hideYnabTabs(
   }
 }
 
-// ─── Step: Write Budget Dashboard Header ──────────────────────────────────────
+// ─── Step: Write Dashboard ────────────────────────────────────────────────────
 //
-// Rows 1–5 of the Budget tab hold key/value pairs for the live dashboard.
+// Rows 1–4 of the Dashboard tab hold key/value pairs for the live dashboard.
 // Column A = label, Column B = formula or value.
-// Named ranges are created so the app and sheet formulas can reference by name.
+// Named ranges are created (or updated) so the app and formulas can reference by name.
 
 async function writeBudgetDashboard(
   sheets: sheets_v4.Sheets,
   sheetId: string,
   sheetMeta: sheets_v4.Schema$Sheet[]
 ): Promise<void> {
-  const meta = findSheet(sheetMeta, "Budget");
+  const meta = findSheet(sheetMeta, "Dashboard");
   if (!meta) return;
 
-  // Check if dashboard is already written (B1 would have the formula)
+  // Check if dashboard is already written
   const existing = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: "Budget!A1:B4",
+    range: "Dashboard!A1:B4",
   });
 
   if (existing.data.values?.[0]?.[0] === "ReadyToAssign") {
-    log("Budget dashboard: already present, skipping");
+    log("Dashboard: already present, skipping");
+
+    // Even if content is already written, ensure named ranges point to Dashboard tab.
+    await ensureDashboardNamedRanges(sheets, sheetId, meta.properties?.sheetId!);
     return;
   }
 
-  // Assignment data starts one row after the header
-  const dataStart = BUDGET_ASSIGNMENTS_START_ROW + 1;
+  // Assignment data starts at row 2 of Budget tab (row 1 is the header)
+  const dataStart = BUDGET_ASSIGNMENTS_START_ROW + 1; // 2
 
   const dashboardRows = [
     [
       "ReadyToAssign",
-      // inflow col Q, outflow col P; minus total assigned in assignments section
+      // inflow col Q, outflow col P; minus total assigned in Budget assignments section
       `=SUM(Transactions!Q2:Q)-SUM(Transactions!P2:P)-SUM(Budget!C${dataStart}:C)`,
     ],
     ["LastYnabSync", ""],
@@ -957,19 +895,32 @@ async function writeBudgetDashboard(
     ],
     [
       "TotalAvailable",
-      // Available = inflows − outflows − assigned (same as ReadyToAssign at this level)
-      `=Budget!B1`,
+      `=Dashboard!B1`,
     ],
   ];
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId,
-    range: "Budget!A1",
+    range: "Dashboard!A1",
     valueInputOption: "USER_ENTERED",
     requestBody: { values: dashboardRows },
   });
 
-  // Define named ranges pointing to the value cells (column B)
+  await ensureDashboardNamedRanges(sheets, sheetId, meta.properties?.sheetId!);
+
+  log("Dashboard: wrote rows 1–4 (ReadyToAssign, LastYnabSync, TotalAssignedThisMonth, TotalAvailable)");
+}
+
+/**
+ * Create or update named ranges to point to Dashboard tab cells.
+ * On v6→v7 migration the named ranges exist but point to the old Budget tab,
+ * so we always upsert (update if found, add if not).
+ */
+async function ensureDashboardNamedRanges(
+  sheets: sheets_v4.Sheets,
+  sheetId: string,
+  dashboardTabSheetId: number
+): Promise<void> {
   const namedRanges = [
     { name: "ReadyToAssign", row: 1 },
     { name: "LastYnabSync", row: 2 },
@@ -977,42 +928,47 @@ async function writeBudgetDashboard(
     { name: "TotalAvailable", row: 4 },
   ];
 
-  // Fetch existing named ranges to avoid duplicates
   const spreadsheet = await sheets.spreadsheets.get({
     spreadsheetId: sheetId,
     fields: "namedRanges",
   });
-  const existingNames = new Set(
-    (spreadsheet.data.namedRanges ?? []).map((nr) => nr.name)
+  const existingByName = new Map(
+    (spreadsheet.data.namedRanges ?? []).map((nr) => [nr.name!, nr])
   );
 
-  const tabSheetId = meta.properties?.sheetId!;
-  const requests: sheets_v4.Schema$Request[] = namedRanges
-    .filter((nr) => !existingNames.has(nr.name))
-    .map((nr) => ({
-      addNamedRange: {
-        namedRange: {
-          name: nr.name,
-          range: {
-            sheetId: tabSheetId,
-            startRowIndex: nr.row - 1,
-            endRowIndex: nr.row,
-            startColumnIndex: 1, // column B
-            endColumnIndex: 2,
+  const requests: sheets_v4.Schema$Request[] = namedRanges.map((nr) => {
+    const rangeSpec = {
+      sheetId: dashboardTabSheetId,
+      startRowIndex: nr.row - 1,
+      endRowIndex: nr.row,
+      startColumnIndex: 1, // column B
+      endColumnIndex: 2,
+    };
+    const existing = existingByName.get(nr.name);
+    if (existing) {
+      return {
+        updateNamedRange: {
+          namedRange: {
+            namedRangeId: existing.namedRangeId,
+            name: nr.name,
+            range: rangeSpec,
           },
+          fields: "range",
         },
+      };
+    }
+    return {
+      addNamedRange: {
+        namedRange: { name: nr.name, range: rangeSpec },
       },
-    }));
+    };
+  });
 
-  if (requests.length > 0) {
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: sheetId,
-      requestBody: { requests },
-    });
-    log(`Budget dashboard: created ${requests.length} named range(s)`);
-  }
-
-  log("Budget dashboard: wrote rows 1–4 (ReadyToAssign, LastYnabSync, TotalAssignedThisMonth, TotalAvailable)");
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: sheetId,
+    requestBody: { requests },
+  });
+  log("Dashboard: named ranges upserted");
 }
 
 // ─── Step: Write Budget_Calcs Formulas ────────────────────────────────────────
@@ -1089,7 +1045,7 @@ async function writeBudgetCalcs(
     spreadsheetId: sheetId,
     range: "Budget_Calcs",
   });
-  const assignDataStart = BUDGET_ASSIGNMENTS_START_ROW + 1; // 509
+  const assignDataStart = BUDGET_ASSIGNMENTS_START_ROW + 1; // 2
 
   // Build all formula rows. Row R for monthIdx m, catIdx c = DATA_START + m*N + c.
   const rows: (string | number)[][] = [];
@@ -1195,8 +1151,9 @@ async function writeSheetVersion(
     range: "Reflect!A1:B1",
   });
 
-  if (existing.data.values?.[0]?.[0] === "sheet_version") {
-    log(`Sheet version: already set to ${existing.data.values[0][1]}, skipping`);
+  const existingVersion = Number(existing.data.values?.[0]?.[1] ?? 0);
+  if (existing.data.values?.[0]?.[0] === "sheet_version" && existingVersion === SHEET_VERSION) {
+    log(`Sheet version: already at ${SHEET_VERSION}, skipping`);
     return;
   }
 
@@ -1226,7 +1183,7 @@ async function cleanOrphanedAssignmentRows(
   sheetId: string,
   sheetMeta: sheets_v4.Schema$Sheet[]
 ): Promise<void> {
-  const dataStart = BUDGET_ASSIGNMENTS_START_ROW + 1; // 509
+  const dataStart = BUDGET_ASSIGNMENTS_START_ROW + 1; // 2
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
@@ -1372,6 +1329,86 @@ async function syncGroupsTab(
   log(`Groups: added ${toAdd.length} group(s): ${toAdd.map((g) => g.name).join(", ")}`);
 }
 
+// ─── Step: Migrate v6 → v7 ───────────────────────────────────────────────────
+//
+// Detects the old Budget tab layout (ReadyToAssign at A1) and migrates in-place:
+//   - Category rows (Budget!A7:G506) → Categories!A2
+//   - Assignment rows (Budget!A509:E) → Budget!A2
+//   - Budget tab cleared and rewritten with assignments only
+//
+// Idempotent: if Budget!A1 is not "ReadyToAssign", migration is skipped.
+
+async function migrateV6ToV7(
+  sheets: sheets_v4.Sheets,
+  sheetId: string
+): Promise<void> {
+  const check = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: "Budget!A1",
+  });
+  const a1 = check.data.values?.[0]?.[0] ?? "";
+  if (a1 !== "ReadyToAssign") {
+    log("Migration: Budget tab already in v7 format, skipping");
+    return;
+  }
+
+  log("Migration: detected v6 Budget format — migrating to v7...");
+
+  // Read category data from old Budget rows 7–506
+  const catRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: "Budget!A7:G506",
+  });
+  const catRows = catRes.data.values ?? [];
+  log(`Migration: read ${catRows.length} category row(s) from Budget!A7:G506`);
+
+  // Read assignment data from old Budget rows 509+
+  const assignRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: "Budget!A509:E",
+  });
+  const assignRows = assignRes.data.values ?? [];
+  log(`Migration: read ${assignRows.length} assignment row(s) from Budget!A509:E`);
+
+  // Write categories to the new Categories tab
+  if (catRows.length > 0) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: "Categories!A2",
+      valueInputOption: "RAW",
+      requestBody: { values: catRows },
+    });
+    log("Migration: wrote categories to Categories!A2");
+  }
+
+  // Clear entire Budget tab, then rewrite with assignments only
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId: sheetId,
+    range: "Budget",
+  });
+
+  // Write assignment column header at row 1
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId,
+    range: "Budget!A1",
+    valueInputOption: "RAW",
+    requestBody: { values: [BUDGET_ASSIGNMENTS_COLUMNS] },
+  });
+
+  // Write assignment data starting at row 2
+  if (assignRows.length > 0) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: "Budget!A2",
+      valueInputOption: "RAW",
+      requestBody: { values: assignRows },
+    });
+    log(`Migration: wrote ${assignRows.length} assignment row(s) to Budget!A2`);
+  }
+
+  log("Migration: v6 → v7 complete");
+}
+
 // ─── Logging & Error Helpers ──────────────────────────────────────────────────
 
 function log(msg: string): void {
@@ -1410,8 +1447,11 @@ async function main(): Promise<void> {
   let sheetMeta = await getSheetMetadata(sheets, sheetId);
   log(`Found ${sheetMeta.length} existing tab(s)`);
 
-  // 5. Ensure all tabs exist
+  // 5. Ensure all tabs exist (Categories and Dashboard created here if new)
   sheetMeta = await ensureTabsExist(sheets, sheetId, sheetMeta);
+
+  // 5a. Migrate v6 → v7: move Budget category/dashboard data to dedicated tabs
+  await migrateV6ToV7(sheets, sheetId);
 
   // 6. Write headers + freeze + format
   await writeHeaders(sheets, sheetId, sheetMeta);

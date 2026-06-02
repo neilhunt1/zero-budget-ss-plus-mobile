@@ -108,8 +108,8 @@ type AuthConfig =
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 // Must stay in sync with setup-sheet.ts
-const BUDGET_ASSIGNMENTS_START_ROW = 508; // header row
-const BUDGET_ASSIGNMENTS_DATA_ROW = BUDGET_ASSIGNMENTS_START_ROW + 1;
+const BUDGET_ASSIGNMENTS_START_ROW = 1; // header row (Budget tab, v7 layout)
+const BUDGET_ASSIGNMENTS_DATA_ROW = BUDGET_ASSIGNMENTS_START_ROW + 1; // 2
 
 const SKIP_GROUPS = new Set(['Credit Card Payments']);
 
@@ -553,7 +553,7 @@ async function wipeAndRewriteSeedTransactions(
   }
 }
 
-/** Update the LastYnabSync cell in the Budget dashboard. */
+/** Update the LastYnabSync cell in the Dashboard tab. */
 async function writeLastYnabSync(
   sheets: sheets_v4.Sheets,
   sheetId: string,
@@ -561,7 +561,7 @@ async function writeLastYnabSync(
 ): Promise<void> {
   await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId,
-    range: 'Budget!B2', // LastYnabSync named range cell
+    range: 'Dashboard!B2', // LastYnabSync named range cell
     valueInputOption: 'RAW',
     requestBody: { values: [[timestamp]] },
   });
