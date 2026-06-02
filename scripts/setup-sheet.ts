@@ -10,48 +10,7 @@
 
 import * as path from "path";
 import * as fs from "fs";
-import Ajv from "ajv";
-import addFormats from "ajv-formats";
 import { google, sheets_v4 } from "googleapis";
-import { handleRemovedCategory } from "./category-utils";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface Category {
-  name: string;
-  type: "fluid" | "fixed_bill" | "savings_target";
-  template?: number;
-  sort_order?: number;
-  active?: boolean;
-}
-
-interface Subgroup {
-  name: string;
-  sort_order?: number;
-  categories: Category[];
-}
-
-interface Group {
-  name: string;
-  sort_order?: number;
-  subgroups?: Subgroup[];
-  categories?: Category[];
-}
-
-interface CategoriesConfig {
-  version: number;
-  groups: Group[];
-}
-
-interface FlatCategory {
-  group: string;
-  subgroup: string;
-  category: string;
-  type: string;
-  template: number;
-  sort_order: number;
-  active: boolean;
-}
 
 // ─── Tab & Column Definitions ─────────────────────────────────────────────────
 
@@ -245,70 +204,6 @@ function loadEnv(): { sheetId: string; authConfig: AuthConfig } {
 
   log(`Sheet ID: ${sheetId}`);
   return { sheetId, authConfig };
-}
-
-// ─── Categories Validation ────────────────────────────────────────────────────
-
-function loadAndValidateCategories(): CategoriesConfig {
-  const schemaPath = path.resolve(process.cwd(), "config/categories.schema.json");
-  const dataPath = path.resolve(process.cwd(), "config/categories.json");
-
-  if (!fs.existsSync(schemaPath)) bail(`Missing config/categories.schema.json`);
-  if (!fs.existsSync(dataPath)) bail(`Missing config/categories.json`);
-
-  const schema = JSON.parse(fs.readFileSync(schemaPath, "utf-8"));
-  const data: CategoriesConfig = JSON.parse(fs.readFileSync(dataPath, "utf-8"));
-
-  const ajv = new Ajv({ allErrors: true });
-  addFormats(ajv);
-  const validate = ajv.compile(schema);
-
-  if (!validate(data)) {
-    const errors = validate.errors
-      ?.map((e) => `  ${e.instancePath || "root"}: ${e.message}`)
-      .join("\n");
-    bail(`config/categories.json is invalid:\n${errors}`);
-  }
-
-  log(`Validated categories.json (version ${data.version}, ${data.groups.length} groups)`);
-  return data;
-}
-
-function flattenCategories(config: CategoriesConfig): FlatCategory[] {
-  const flat: FlatCategory[] = [];
-  let globalSortOrder = 0;
-
-  for (const group of config.groups) {
-    if (group.subgroups) {
-      for (const subgroup of group.subgroups) {
-        for (const cat of subgroup.categories) {
-          flat.push({
-            group: group.name,
-            subgroup: subgroup.name,
-            category: cat.name,
-            type: cat.type,
-            template: cat.template ?? 0,
-            sort_order: cat.sort_order ?? ++globalSortOrder,
-            active: cat.active ?? true,
-          });
-        }
-      }
-    } else if (group.categories) {
-      for (const cat of group.categories) {
-        flat.push({
-          group: group.name,
-          subgroup: "",
-          category: cat.name,
-          type: cat.type,
-          template: cat.template ?? 0,
-          sort_order: cat.sort_order ?? ++globalSortOrder,
-          active: cat.active ?? true,
-        });
-      }
-    }
-  }
-
-  return flat;
 }
 
 // ─── Google Sheets Helpers ────────────────────────────────────────────────────
@@ -604,48 +499,6 @@ async function applyConditionalFormatting(
   log("Conditional formatting: applied to Transactions tab (status + category columns)");
 }
 
-// ─── Step: Seed Categories tab ────────────────────────────────────────────────
-//
-// The Categories tab is user-owned data — categories are managed directly in the
-// sheet (or eventually through the app). categories.json is only used for the
-// initial seed when the tab is empty. After that, setup never overwrites it.
-
-async function seedBudgetCategories(
-  sheets: sheets_v4.Sheets,
-  sheetId: string,
-  newCategories: FlatCategory[]
-): Promise<void> {
-  const existingRes = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: `Categories!A${CATEGORIES_START_ROW}:G${CATEGORIES_END_ROW}`,
-  });
-  const existingRows = existingRes.data.values ?? [];
-
-  if (existingRows.length > 0) {
-    log(`Categories seed: tab has ${existingRows.length} row(s) — skipping (user-owned data)`);
-    return;
-  }
-
-  // Tab is empty — seed from categories.json as the initial dataset.
-  const rows = newCategories.map((c) => [
-    c.group,
-    c.subgroup,
-    c.category,
-    c.type,
-    c.template,
-    c.sort_order,
-    c.active ? "TRUE" : "FALSE",
-  ]);
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: sheetId,
-    range: `Categories!A${CATEGORIES_START_ROW}`,
-    valueInputOption: "RAW",
-    requestBody: { values: rows },
-  });
-
-  log(`Categories seed: wrote ${rows.length} categories from categories.json (initial seed)`);
-}
 
 
 // ─── Step: Lock BankToSheets-managed tabs ─────────────────────────────────────
@@ -888,8 +741,7 @@ function generateMonthRange(monthsBack: number, monthsForward: number): string[]
 async function writeBudgetCalcs(
   sheets: sheets_v4.Sheets,
   sheetId: string,
-  sheetMeta: sheets_v4.Schema$Sheet[],
-  activeCategories: FlatCategory[]
+  sheetMeta: sheets_v4.Schema$Sheet[]
 ): Promise<void> {
   const meta = findSheet(sheetMeta, "Budget_Calcs");
   if (!meta) {
@@ -897,12 +749,22 @@ async function writeBudgetCalcs(
     return;
   }
 
+  // Read active categories from the user-managed Categories tab.
+  // Columns: category_group(0), subgroup(1), category(2), type(3), template(4), sort_order(5), active(6)
+  const catRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `Categories!A${CATEGORIES_START_ROW}:G${CATEGORIES_END_ROW}`,
+  });
+  const cats = (catRes.data.values ?? [])
+    .filter((r) => r[2] && (r[6] ?? "").toString().toUpperCase() === "TRUE")
+    .map((r) => ({ category: r[2] as string, sort_order: parseInt(r[5] ?? "0") || 0 }))
+    .sort((a, b) => a.sort_order - b.sort_order);
+
   const months = generateMonthRange(CALCS_MONTHS_BACK, CALCS_MONTHS_FORWARD);
-  const cats = activeCategories.filter((c) => c.active).sort((a, b) => a.sort_order - b.sort_order);
   const N = cats.length; // rows per month block
 
   if (N === 0) {
-    log("Budget_Calcs: no active categories, skipping formula rows");
+    log("Budget_Calcs: Categories tab is empty, skipping formula rows");
     return;
   }
 
@@ -1141,42 +1003,14 @@ async function cleanOrphanedAssignmentRows(
 
 // ─── Step: Sync Groups Tab ────────────────────────────────────────────────────
 //
-// Adds new groups from categories.json that don't yet appear in the Groups tab.
+// Derives group names from the Categories tab and ensures each appears in Groups.
 // Preserves existing rows — budget_type and rollover settings are user-editable
 // directly in the sheet and must not be overwritten by setup reruns.
-
-interface GroupsConfig {
-  version: number;
-  groups: Array<{
-    name: string;
-    budget_type: string;
-    rollover: boolean;
-    rollover_start_month: string;
-  }>;
-}
-
-function loadGroupsConfig(categoriesConfig: CategoriesConfig): GroupsConfig {
-  const dataPath = path.resolve(process.cwd(), "config/groups.json");
-  if (fs.existsSync(dataPath)) {
-    return JSON.parse(fs.readFileSync(dataPath, "utf-8")) as GroupsConfig;
-  }
-  // Fall back to deriving defaults from categories.json if groups.json is missing
-  return {
-    version: 1,
-    groups: categoriesConfig.groups.map((g) => ({
-      name: g.name,
-      budget_type: "by_category",
-      rollover: false,
-      rollover_start_month: "",
-    })),
-  };
-}
 
 async function syncGroupsTab(
   sheets: sheets_v4.Sheets,
   sheetId: string,
-  sheetMeta: sheets_v4.Schema$Sheet[],
-  categoriesConfig: CategoriesConfig
+  sheetMeta: sheets_v4.Schema$Sheet[]
 ): Promise<void> {
   const meta = findSheet(sheetMeta, "Groups");
   if (!meta) {
@@ -1184,9 +1018,23 @@ async function syncGroupsTab(
     return;
   }
 
-  const groupsConfig = loadGroupsConfig(categoriesConfig);
+  // Derive distinct group names from the Categories tab (column A = category_group)
+  const catRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `Categories!A${CATEGORIES_START_ROW}:A${CATEGORIES_END_ROW}`,
+  });
+  const groupNames = [
+    ...new Set(
+      (catRes.data.values ?? []).map((r) => (r[0] ?? "").toString().trim()).filter(Boolean)
+    ),
+  ];
 
-  // Read existing group names from the tab
+  if (groupNames.length === 0) {
+    log("Groups: Categories tab is empty, skipping group sync");
+    return;
+  }
+
+  // Read existing group names from the Groups tab
   const existing = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
     range: "Groups!A2:A",
@@ -1195,20 +1043,19 @@ async function syncGroupsTab(
     (existing.data.values ?? []).map((r) => (r[0] ?? "").toString().trim()).filter(Boolean)
   );
 
-  // Find groups in config that are not yet in the sheet
-  const toAdd = groupsConfig.groups.filter((g) => !existingNames.has(g.name));
+  const toAdd = groupNames.filter((g) => !existingNames.has(g));
 
   if (toAdd.length === 0) {
     log("Groups: all groups already present, skipping");
     return;
   }
 
-  const rows = toAdd.map((g) => [
-    g.name,
-    g.budget_type,
-    g.rollover ? "TRUE" : "FALSE",
-    g.rollover_start_month,
-    0, // monthly_template_amount — user sets this in the sheet
+  const rows = toAdd.map((name) => [
+    name,
+    "by_category",  // default budget_type — user can change in sheet
+    "FALSE",        // rollover
+    "",             // rollover_start_month
+    0,              // monthly_template_amount
   ]);
 
   await sheets.spreadsheets.values.append({
@@ -1219,7 +1066,7 @@ async function syncGroupsTab(
     requestBody: { values: rows },
   });
 
-  log(`Groups: added ${toAdd.length} group(s): ${toAdd.map((g) => g.name).join(", ")}`);
+  log(`Groups: added ${toAdd.length} group(s): ${toAdd.join(", ")}`);
 }
 
 // ─── Step: Migrate v6 → v7 ───────────────────────────────────────────────────
@@ -1321,11 +1168,7 @@ async function main(): Promise<void> {
   // 1. Load environment
   const { sheetId, authConfig } = loadEnv();
 
-  // 2. Validate categories
-  const categoriesConfig = loadAndValidateCategories();
-  const flatCategories = flattenCategories(categoriesConfig);
-
-  // 3. Authenticate
+  // 2. Authenticate
   const auth = new google.auth.GoogleAuth({
     ...(authConfig.kind === "keyFile"
       ? { keyFile: authConfig.keyPath }
@@ -1355,9 +1198,6 @@ async function main(): Promise<void> {
   // 8. Apply conditional formatting to Transactions
   await applyConditionalFormatting(sheets, sheetId, sheetMeta);
 
-  // 9. Seed Budget tab with categories (clear-then-rewrite for clean sync)
-  await seedBudgetCategories(sheets, sheetId, flatCategories);
-
   // 10. Lock BankToSheets-managed tabs
   await lockBankToSheetsRaw(sheets, sheetId, sheetMeta);
   await lockTab(sheets, sheetId, sheetMeta, "Balance History (BTS)");
@@ -1369,13 +1209,13 @@ async function main(): Promise<void> {
   await writeBudgetDashboard(sheets, sheetId, sheetMeta);
 
   // 13. Write Budget_Calcs formulas (activity + available with rollover, per category per month)
-  await writeBudgetCalcs(sheets, sheetId, sheetMeta, flatCategories);
+  await writeBudgetCalcs(sheets, sheetId, sheetMeta);
 
   // 14. Write sheet version
   await writeSheetVersion(sheets, sheetId);
 
-  // 15. Sync Groups tab — add any new groups from categories.json (preserves existing settings)
-  await syncGroupsTab(sheets, sheetId, sheetMeta, categoriesConfig);
+  // 15. Sync Groups tab — add any new groups derived from Categories tab (preserves existing settings)
+  await syncGroupsTab(sheets, sheetId, sheetMeta);
 
   // 16. Clean up orphaned assignment rows (month stored as date serial instead of YYYY-MM text)
   await cleanOrphanedAssignmentRows(sheets, sheetId, sheetMeta);
