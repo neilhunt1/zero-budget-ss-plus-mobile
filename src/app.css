@@ -193,6 +193,27 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .budget-row.overspent { background: #fff5f4; }
 .budget-row:hover { background: #f8faff; }
 
+/* ── Group-envelope row (by_group groups) ─────────────────────────────────── */
+.budget-row--group-envelope {
+  background: #eef3fb;
+  border-left: 3px solid var(--accent);
+  padding-left: 13px; /* compensate for 3px border */
+  font-weight: 600;
+}
+.budget-row--group-envelope:hover { background: #e4ecf8; }
+.budget-row--group-envelope.overspent { background: #fdf0ef; border-left-color: var(--negative); }
+.group-envelope-period { font-size: 11px; font-weight: 400; color: var(--text-secondary); }
+.group-envelope-unset { font-weight: 400; color: var(--text-secondary); font-style: italic; font-size: 13px; }
+
+/* ── Category rows inside by_group groups (actuals-only) ──────────────────── */
+.budget-row--actuals-only {
+  padding-left: 28px; /* indent under the envelope row */
+  color: var(--text-secondary);
+}
+.budget-row--actuals-only .col-name { color: var(--text); font-size: 13px; }
+.budget-row--actuals-only .col-num { font-size: 13px; color: var(--text-secondary); }
+.budget-row--actuals-only:hover { background: #f8faff; }
+
 .col-name { flex: 1; font-size: 14px; }
 .col-num { width: 80px; text-align: right; font-size: 14px; font-variant-numeric: tabular-nums; }
 
@@ -778,6 +799,11 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   .plan-group-tab-name { flex: 1; }
   .plan-group-tab-total { font-size: 12px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
   .plan-group-tab-total.negative { color: var(--negative); }
+  .plan-group-tab-badge {
+    font-size: 10px; font-weight: 700; color: var(--accent);
+    background: #dce8f7; border-radius: 3px;
+    padding: 1px 4px; margin-left: 5px; letter-spacing: 0; flex-shrink: 0;
+  }
 
   /* ── Desktop transaction list ─────────────────────────────────────── */
   /* column order: date | account | payee | category | memo | outflow | inflow | type | rev | clr */

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "groups": [
+    { "name": "Food & Dining", "budget_type": "by_category", "rollover": false, "rollover_start_month": "" },
+    { "name": "Kids & School", "budget_type": "by_category", "rollover": false, "rollover_start_month": "" },
+    { "name": "Family Fun", "budget_type": "by_category", "rollover": false, "rollover_start_month": "" },
+    { "name": "Home", "budget_type": "by_category", "rollover": false, "rollover_start_month": "" },
+    { "name": "Transportation", "budget_type": "by_category", "rollover": false, "rollover_start_month": "" },
+    { "name": "Health & Wellness", "budget_type": "by_category", "rollover": false, "rollover_start_month": "" },
+    { "name": "Technology & Subscriptions", "budget_type": "by_category", "rollover": false, "rollover_start_month": "" },
+    { "name": "Personal & Discretionary", "budget_type": "by_category", "rollover": false, "rollover_start_month": "" },
+    { "name": "Pets", "budget_type": "by_category", "rollover": false, "rollover_start_month": "" },
+    { "name": "Savings & Variable Stuff", "budget_type": "by_category", "rollover": false, "rollover_start_month": "" },
+    { "name": "Charitable Giving", "budget_type": "by_category", "rollover": false, "rollover_start_month": "" },
+    { "name": "Gifts & Holidays🎁", "budget_type": "by_category", "rollover": false, "rollover_start_month": "" },
+    { "name": "Vacations & Travel", "budget_type": "by_category", "rollover": false, "rollover_start_month": "" },
+    { "name": "Neil's Personal", "budget_type": "by_category", "rollover": false, "rollover_start_month": "" },
+    { "name": "Emory Money", "budget_type": "by_category", "rollover": false, "rollover_start_month": "" },
+    { "name": "Amara Money", "budget_type": "by_category", "rollover": false, "rollover_start_month": "" },
+    { "name": "Business Expenses", "budget_type": "by_category", "rollover": false, "rollover_start_month": "" },
+    { "name": "Legacy Categories", "budget_type": "by_category", "rollover": false, "rollover_start_month": "" }
+  ]
+}

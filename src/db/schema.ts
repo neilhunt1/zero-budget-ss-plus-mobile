@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { Transaction, BudgetCategory, BudgetAssignment, BudgetCalcEntry } from '../types';
+import type { Transaction, BudgetCategory, BudgetAssignment, BudgetCalcEntry, BudgetGroup, GroupBudgetAssignment } from '../types';
 
 export interface SyncMeta {
   key: string;
@@ -15,6 +15,8 @@ export class BudgetDatabase extends Dexie {
   budgetCategories!: Table<BudgetCategory>;
   budgetAssignments!: Table<BudgetAssignment>;
   budgetCalcs!: Table<BudgetCalcEntry>;
+  budgetGroups!: Table<BudgetGroup>;
+  budgetGroupAssignments!: Table<GroupBudgetAssignment>;
   syncMeta!: Table<SyncMeta>;
 
   constructor() {
@@ -32,6 +34,15 @@ export class BudgetDatabase extends Dexie {
       budgetCategories: 'category, category_group, active',
       budgetAssignments: '[month+category], month, category, source',
       budgetCalcs: '[month+category], month, category',
+      syncMeta: 'key',
+    });
+    this.version(3).stores({
+      transactions: 'transaction_id, date, category, account, reviewed, transaction_type, status, parent_id, split_group_id',
+      budgetCategories: 'category, category_group, active',
+      budgetAssignments: '[month+category], month, category, source',
+      budgetCalcs: '[month+category], month, category',
+      budgetGroups: 'group_name, budget_type',
+      budgetGroupAssignments: '[month+category_group], month, category_group',
       syncMeta: 'key',
     });
   }

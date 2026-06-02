@@ -105,7 +105,9 @@ const BUDGET_CATEGORIES_HEADER_ROW = 6;
 const BUDGET_CATEGORIES_START_ROW = 7;
 const BUDGET_CATEGORIES_END_ROW = 506;
 const BUDGET_ASSIGNMENTS_START_ROW = 508; // header row; data starts at 509
-const BUDGET_ASSIGNMENTS_COLUMNS = ["month", "category", "assigned", "source"];
+const BUDGET_ASSIGNMENTS_COLUMNS = ["month", "category", "assigned", "source", "category_group"];
+
+const GROUPS_COLUMNS = ["group_name", "budget_type", "rollover", "rollover_start_month", "monthly_template_amount"];
 
 const TEMPLATES_COLUMNS = [
   "template_id",
@@ -132,6 +134,7 @@ const BUDGET_LOG_COLUMNS = [
 const TABS_IN_ORDER = [
   "Transactions",
   "Budget",
+  "Groups",
   "Templates",
   "Reflect",
   "Budget_Log",
@@ -152,7 +155,7 @@ const HEADER_BG_COLOR = { red: 0.29, green: 0.525, blue: 0.91 };
 const HEADER_FG_COLOR = { red: 1, green: 1, blue: 1 };
 
 // Sheet schema version — increment when structure changes
-const SHEET_VERSION = 5;
+const SHEET_VERSION = 6;
 
 // ─── Environment Loading ───────────────────────────────────────────────────────
 
@@ -371,6 +374,7 @@ async function writeHeaders(
   const tabHeaders: Array<{ title: string; columns: string[]; headerRow: number }> = [
     { title: "Transactions", columns: TRANSACTIONS_COLUMNS, headerRow: 1 },
     { title: "Budget", columns: BUDGET_CATEGORY_COLUMNS, headerRow: BUDGET_CATEGORIES_HEADER_ROW },
+    { title: "Groups", columns: GROUPS_COLUMNS, headerRow: 1 },
     { title: "Templates", columns: TEMPLATES_COLUMNS, headerRow: 1 },
     { title: "Budget_Log", columns: BUDGET_LOG_COLUMNS, headerRow: 1 },
   ];
@@ -449,13 +453,22 @@ async function writeHeaders(
   }
 
   // Write Budget monthly assignments header at BUDGET_ASSIGNMENTS_START_ROW
+  // Uses same content-comparison logic as other tab headers so new columns are picked up.
   const budgetMeta = findSheet(sheetMeta, "Budget");
   if (budgetMeta) {
-    const existing = await sheets.spreadsheets.values.get({
+    const existingAssign = await sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
-      range: `Budget!A${BUDGET_ASSIGNMENTS_START_ROW}:D${BUDGET_ASSIGNMENTS_START_ROW}`,
+      range: `Budget!A${BUDGET_ASSIGNMENTS_START_ROW}:E${BUDGET_ASSIGNMENTS_START_ROW}`,
     });
-    if (!existing.data.values?.[0]?.length) {
+    const assignHeaderValues = existingAssign.data.values?.[0] ?? [];
+    const assignHeaderCorrect =
+      assignHeaderValues.length >= BUDGET_ASSIGNMENTS_COLUMNS.length &&
+      BUDGET_ASSIGNMENTS_COLUMNS.every((col, i) => assignHeaderValues[i]?.trim() === col.trim());
+
+    if (!assignHeaderCorrect) {
+      if (assignHeaderValues.length > 0) {
+        log(`Headers: Budget assignments header row ${BUDGET_ASSIGNMENTS_START_ROW} has stale/incorrect content — overwriting`);
+      }
       await sheets.spreadsheets.values.update({
         spreadsheetId: sheetId,
         range: `Budget!A${BUDGET_ASSIGNMENTS_START_ROW}`,
@@ -490,7 +503,7 @@ async function writeHeaders(
         },
       });
     } else {
-      log("Headers: Budget monthly assignments already present, skipping");
+      log("Headers: Budget monthly assignments already correct, skipping");
     }
   }
 
@@ -1276,6 +1289,89 @@ async function cleanOrphanedAssignmentRows(
   log(`Cleanup: deleted ${orphanedIndices.length} orphaned assignment row(s)`);
 }
 
+// ─── Step: Sync Groups Tab ────────────────────────────────────────────────────
+//
+// Adds new groups from categories.json that don't yet appear in the Groups tab.
+// Preserves existing rows — budget_type and rollover settings are user-editable
+// directly in the sheet and must not be overwritten by setup reruns.
+
+interface GroupsConfig {
+  version: number;
+  groups: Array<{
+    name: string;
+    budget_type: string;
+    rollover: boolean;
+    rollover_start_month: string;
+  }>;
+}
+
+function loadGroupsConfig(categoriesConfig: CategoriesConfig): GroupsConfig {
+  const dataPath = path.resolve(process.cwd(), "config/groups.json");
+  if (fs.existsSync(dataPath)) {
+    return JSON.parse(fs.readFileSync(dataPath, "utf-8")) as GroupsConfig;
+  }
+  // Fall back to deriving defaults from categories.json if groups.json is missing
+  return {
+    version: 1,
+    groups: categoriesConfig.groups.map((g) => ({
+      name: g.name,
+      budget_type: "by_category",
+      rollover: false,
+      rollover_start_month: "",
+    })),
+  };
+}
+
+async function syncGroupsTab(
+  sheets: sheets_v4.Sheets,
+  sheetId: string,
+  sheetMeta: sheets_v4.Schema$Sheet[],
+  categoriesConfig: CategoriesConfig
+): Promise<void> {
+  const meta = findSheet(sheetMeta, "Groups");
+  if (!meta) {
+    log("Groups: tab not found, skipping");
+    return;
+  }
+
+  const groupsConfig = loadGroupsConfig(categoriesConfig);
+
+  // Read existing group names from the tab
+  const existing = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: "Groups!A2:A",
+  });
+  const existingNames = new Set(
+    (existing.data.values ?? []).map((r) => (r[0] ?? "").toString().trim()).filter(Boolean)
+  );
+
+  // Find groups in config that are not yet in the sheet
+  const toAdd = groupsConfig.groups.filter((g) => !existingNames.has(g.name));
+
+  if (toAdd.length === 0) {
+    log("Groups: all groups already present, skipping");
+    return;
+  }
+
+  const rows = toAdd.map((g) => [
+    g.name,
+    g.budget_type,
+    g.rollover ? "TRUE" : "FALSE",
+    g.rollover_start_month,
+    0, // monthly_template_amount — user sets this in the sheet
+  ]);
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: sheetId,
+    range: "Groups!A2",
+    valueInputOption: "RAW",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: { values: rows },
+  });
+
+  log(`Groups: added ${toAdd.length} group(s): ${toAdd.map((g) => g.name).join(", ")}`);
+}
+
 // ─── Logging & Error Helpers ──────────────────────────────────────────────────
 
 function log(msg: string): void {
@@ -1346,7 +1442,10 @@ async function main(): Promise<void> {
   // 14. Write sheet version
   await writeSheetVersion(sheets, sheetId);
 
-  // 15. Clean up orphaned assignment rows (month stored as date serial instead of YYYY-MM text)
+  // 15. Sync Groups tab — add any new groups from categories.json (preserves existing settings)
+  await syncGroupsTab(sheets, sheetId, sheetMeta, categoriesConfig);
+
+  // 16. Clean up orphaned assignment rows (month stored as date serial instead of YYYY-MM text)
   await cleanOrphanedAssignmentRows(sheets, sheetId, sheetMeta);
 
   console.log(
