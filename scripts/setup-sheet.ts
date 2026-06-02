@@ -606,73 +606,28 @@ async function applyConditionalFormatting(
 
 // ─── Step: Seed Categories tab ────────────────────────────────────────────────
 //
-// Strategy: clear rows 2–501 of the Categories tab and rewrite from categories.json.
-// Before clearing, we check for categories that existed in the sheet but were
-// removed from categories.json. If any are referenced by transactions they are
-// archived (active:false) rather than deleted — preserving historical data
-// integrity. Categories with no transaction references are removed cleanly.
+// The Categories tab is user-owned data — categories are managed directly in the
+// sheet (or eventually through the app). categories.json is only used for the
+// initial seed when the tab is empty. After that, setup never overwrites it.
 
 async function seedBudgetCategories(
   sheets: sheets_v4.Sheets,
   sheetId: string,
   newCategories: FlatCategory[]
 ): Promise<void> {
-  // ── 1. Read current Categories tab rows to detect removals ───────────────────
   const existingRes = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
     range: `Categories!A${CATEGORIES_START_ROW}:G${CATEGORIES_END_ROW}`,
   });
   const existingRows = existingRes.data.values ?? [];
 
-  // ── 2. Identify removed categories (in sheet now, absent from new JSON) ──────
-  const newNames = new Set(newCategories.map((c) => c.category));
-  const removedRows = existingRows.filter((r) => r[2] && !newNames.has(r[2]));
-
-  // ── 3. Count transaction references for each removed category ────────────────
-  //    Skip the Transactions read entirely if nothing was removed (common case).
-  const txCounts = new Map<string, number>();
-  if (removedRows.length > 0) {
-    // Read only the category column (K) — avoids pulling full transaction rows.
-    const txRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: sheetId,
-      range: "Transactions!K2:K",
-    });
-    for (const row of txRes.data.values ?? []) {
-      const name = row[0] as string | undefined;
-      if (name) txCounts.set(name, (txCounts.get(name) ?? 0) + 1);
-    }
+  if (existingRows.length > 0) {
+    log(`Categories seed: tab has ${existingRows.length} row(s) — skipping (user-owned data)`);
+    return;
   }
 
-  // ── 4. Decide archive vs remove for each removed category ────────────────────
-  const toArchive: FlatCategory[] = [];
-  for (const row of removedRows) {
-    const name = row[2] as string;
-    const txCount = txCounts.get(name) ?? 0;
-    const { action, reason } = handleRemovedCategory(name, txCount);
-
-    if (action === "archive") {
-      toArchive.push({
-        group: row[0] ?? "",
-        subgroup: row[1] ?? "",
-        category: name,
-        type: row[3] ?? "fluid",
-        template: parseFloat(row[4]) || 0,
-        sort_order: parseInt(row[5]) || 9999,
-        active: false,
-      });
-      log(`Categories seed: ⚠  archived "${name}" — ${reason}`);
-    } else {
-      log(`Categories seed: removed "${name}" — ${reason}`);
-    }
-  }
-
-  // ── 5. Clear category rows and rewrite: active categories + archived ones ────
-  await sheets.spreadsheets.values.clear({
-    spreadsheetId: sheetId,
-    range: `Categories!A${CATEGORIES_START_ROW}:G${CATEGORIES_END_ROW}`,
-  });
-
-  const allRows = [...newCategories, ...toArchive].map((c) => [
+  // Tab is empty — seed from categories.json as the initial dataset.
+  const rows = newCategories.map((c) => [
     c.group,
     c.subgroup,
     c.category,
@@ -686,74 +641,12 @@ async function seedBudgetCategories(
     spreadsheetId: sheetId,
     range: `Categories!A${CATEGORIES_START_ROW}`,
     valueInputOption: "RAW",
-    requestBody: { values: allRows },
+    requestBody: { values: rows },
   });
 
-  const archivedCount = toArchive.length;
-  const removedCount = removedRows.length - archivedCount;
-  log(
-    `Categories seed: wrote ${newCategories.length} active` +
-    (archivedCount ? `, ${archivedCount} archived` : "") +
-    (removedCount ? `, ${removedCount} removed` : "") +
-    " categories"
-  );
+  log(`Categories seed: wrote ${rows.length} categories from categories.json (initial seed)`);
 }
 
-// ─── Step: Lock Categories tab ───────────────────────────────────────────────
-//
-// Protect the entire Categories tab with a warning. The edit path for
-// categories is categories.json + re-run setup, not direct sheet editing.
-
-async function lockBudgetCategories(
-  sheets: sheets_v4.Sheets,
-  sheetId: string,
-  sheetMeta: sheets_v4.Schema$Sheet[]
-): Promise<void> {
-  const meta = findSheet(sheetMeta, "Categories");
-  if (!meta) return;
-
-  const tabSheetId = meta.properties?.sheetId!;
-
-  const spreadsheet = await sheets.spreadsheets.get({
-    spreadsheetId: sheetId,
-    fields: "sheets(protectedRanges)",
-  });
-
-  const allProtected = spreadsheet.data.sheets?.flatMap(
-    (s) => s.protectedRanges ?? []
-  ) ?? [];
-
-  // Check if the whole Categories tab is already protected (no row range = whole sheet)
-  const alreadyLocked = allProtected.some(
-    (p) =>
-      p.range?.sheetId === tabSheetId &&
-      p.range?.startRowIndex == null
-  );
-
-  if (alreadyLocked) {
-    log("Lock: Categories tab already protected, skipping");
-    return;
-  }
-
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: sheetId,
-    requestBody: {
-      requests: [
-        {
-          addProtectedRange: {
-            protectedRange: {
-              range: { sheetId: tabSheetId },
-              description: "Managed by categories.json — edit there and re-run setup, not here",
-              warningOnly: true,
-            },
-          },
-        },
-      ],
-    },
-  });
-
-  log("Lock: Categories tab protected (warn on edit)");
-}
 
 // ─── Step: Lock BankToSheets-managed tabs ─────────────────────────────────────
 
@@ -1465,8 +1358,7 @@ async function main(): Promise<void> {
   // 9. Seed Budget tab with categories (clear-then-rewrite for clean sync)
   await seedBudgetCategories(sheets, sheetId, flatCategories);
 
-  // 10. Lock Budget category rows + BankToSheets-managed tabs
-  await lockBudgetCategories(sheets, sheetId, sheetMeta);
+  // 10. Lock BankToSheets-managed tabs
   await lockBankToSheetsRaw(sheets, sheetId, sheetMeta);
   await lockTab(sheets, sheetId, sheetMeta, "Balance History (BTS)");
 
