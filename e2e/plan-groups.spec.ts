@@ -10,9 +10,14 @@
  *
  * Requires: setup:test has been run at least once so the Groups tab exists.
  * GOOGLE_SHEET_ID in .env.test must point to BTSZB-Test.
+ *
+ * Project coverage:
+ *   desktop-chrome / desktop-webkit : all describe blocks except "mobile layout"
+ *   mobile-chrome / mobile-safari   : "Group Envelope row", "Apply Template",
+ *                                     "mobile layout" (sidebar skipped — not rendered)
  */
 
-import { test, expect, Page, Browser } from '@playwright/test';
+import { test, expect, Page, Browser, WorkerInfo } from '@playwright/test';
 import { injectServiceAccountAuth, getServiceAccountToken } from './fixtures/auth';
 import { seedGroupForTest, currentMonth } from './helpers/group-seed';
 
@@ -35,11 +40,17 @@ test.beforeAll(async () => {
 });
 
 /**
- * Navigate to Plan, inject auth, and wait for sync to complete.
- * Reused in beforeAll blocks — one sync per describe group, not one per test.
+ * Navigate to Plan using the project's device settings (viewport, user-agent, etc.)
+ * and wait for the full sync to complete.
+ *
+ * Passing workerInfo lets each Playwright project (desktop-chrome, mobile-chrome, etc.)
+ * bring its own viewport and device emulation — previously hardcoded viewports meant
+ * mobile-chrome was actually running at desktop size.
  */
-async function loadPlanPage(browser: Browser, viewport: { width: number; height: number }): Promise<Page> {
-  const context = await browser.newContext({ viewport });
+async function loadPlanPage(browser: Browser, workerInfo: WorkerInfo): Promise<Page> {
+  // Use the project's full device settings so mobile projects get the correct viewport,
+  // user-agent, touch events, etc.
+  const context = await browser.newContext(workerInfo.project.use);
   const page = await context.newPage();
   await injectServiceAccountAuth(page);
   await page.goto('./#/plan');
@@ -47,29 +58,36 @@ async function loadPlanPage(browser: Browser, viewport: { width: number; height:
   return page;
 }
 
-// ─── Sidebar ─────────────────────────────────────────────────────────────────
+function isMobile(workerInfo: WorkerInfo): boolean {
+  return workerInfo.project.name.includes('mobile');
+}
 
-test.describe('Plan screen — group budgeting sidebar (desktop)', () => {
+// ─── Sidebar (desktop only) ───────────────────────────────────────────────────
+// The sidebar only renders on viewport ≥ 768px. Skipped on mobile projects.
+
+test.describe('Plan screen — group budgeting sidebar', () => {
   test.describe.configure({ mode: 'serial' });
 
   let sharedPage: Page;
 
-  test.beforeAll(async ({ browser }) => {
-    sharedPage = await loadPlanPage(browser, { width: 1024, height: 768 });
+  test.beforeAll(async ({ browser }, workerInfo) => {
+    if (isMobile(workerInfo)) return; // page not created — all tests will skip
+    sharedPage = await loadPlanPage(browser, workerInfo);
   });
 
   test.afterAll(async () => {
-    await sharedPage.context().close();
+    await sharedPage?.context().close();
   });
 
-  test('by_group group shows a G badge in the sidebar', async () => {
+  test('by_group group shows a G badge in the sidebar', async ({}, workerInfo) => {
+    test.skip(isMobile(workerInfo), 'Sidebar not rendered on mobile viewport');
     const tab = sharedPage.locator('.plan-group-tab', { hasText: TEST_GROUP });
     await expect(tab).toBeVisible();
     await expect(tab.locator('.plan-group-tab-badge')).toHaveText('G');
   });
 
-  test('by_category group does NOT show a G badge', async () => {
-    // Filter to tabs that do not contain the test group name text
+  test('by_category group does NOT show a G badge', async ({}, workerInfo) => {
+    test.skip(isMobile(workerInfo), 'Sidebar not rendered on mobile viewport');
     const otherTabs = sharedPage.locator('.plan-group-tab').filter({ hasNotText: TEST_GROUP });
     await expect(otherTabs.first()).toBeVisible();
     for (const tab of await otherTabs.all()) {
@@ -77,27 +95,32 @@ test.describe('Plan screen — group budgeting sidebar (desktop)', () => {
     }
   });
 
-  test('sidebar shows groupAvailable (dollar amount) for by_group group', async () => {
+  test('sidebar shows groupAvailable (dollar amount) for by_group group', async ({}, workerInfo) => {
+    test.skip(isMobile(workerInfo), 'Sidebar not rendered on mobile viewport');
     const tab = sharedPage.locator('.plan-group-tab', { hasText: TEST_GROUP });
     await expect(tab.locator('.plan-group-tab-total')).toHaveText(/\$[\d,]+/);
   });
 });
 
-// ─── Group Envelope row ───────────────────────────────────────────────────────
+// ─── Group Envelope row (desktop + mobile) ────────────────────────────────────
+// Runs on all projects. On desktop, navigates to Food & Dining via sidebar.
+// On mobile, all groups are stacked so no sidebar navigation is needed.
 
 test.describe('Plan screen — Group Envelope row', () => {
   test.describe.configure({ mode: 'serial' });
 
   let sharedPage: Page;
 
-  test.beforeAll(async ({ browser }) => {
-    sharedPage = await loadPlanPage(browser, { width: 1024, height: 768 });
-    // Select Food & Dining in the sidebar so its detail is visible for all tests
-    await sharedPage.locator('.plan-group-tab', { hasText: TEST_GROUP }).click();
+  test.beforeAll(async ({ browser }, workerInfo) => {
+    sharedPage = await loadPlanPage(browser, workerInfo);
+    // On desktop, select Food & Dining in the sidebar to show its detail panel
+    if (!isMobile(workerInfo)) {
+      await sharedPage.locator('.plan-group-tab', { hasText: TEST_GROUP }).click();
+    }
   });
 
   test.afterAll(async () => {
-    await sharedPage.context().close();
+    await sharedPage?.context().close();
   });
 
   test('Group Envelope row appears at the top of a by_group group', async () => {
@@ -133,12 +156,14 @@ test.describe('Plan screen — Group Envelope row', () => {
     await expect(sheet).toBeVisible({ timeout: 3_000 });
     await expect(sheet).toContainText(TEST_GROUP);
     await expect(sharedPage.locator('#assign-group-input')).toBeVisible();
-    // Close via Cancel — the overlay has no Escape key handler, backdrop click is the dismiss path
+    // Close via Cancel — the overlay has no Escape key handler
     await sharedPage.getByRole('button', { name: /^Cancel$/i }).click();
     await expect(sheet).not.toBeAttached({ timeout: 3_000 });
   });
 
-  test('saving a new group budget amount updates the display', async () => {
+  test('saving a new group budget amount updates the display', async ({}, workerInfo) => {
+    // Only run the write test on desktop to avoid double-writing (one project is enough)
+    test.skip(isMobile(workerInfo), 'Write tested on desktop; skipped on mobile to avoid double-write');
     await sharedPage.locator('.budget-row--group-envelope').click();
     await expect(sharedPage.locator('#assign-group-input')).toBeVisible({ timeout: 3_000 });
 
@@ -150,19 +175,19 @@ test.describe('Plan screen — Group Envelope row', () => {
   });
 });
 
-// ─── Apply Template ───────────────────────────────────────────────────────────
+// ─── Apply Template (desktop + mobile) ───────────────────────────────────────
 
 test.describe('Plan screen — Apply Template with group budget', () => {
   test.describe.configure({ mode: 'serial' });
 
   let sharedPage: Page;
 
-  test.beforeAll(async ({ browser }) => {
-    sharedPage = await loadPlanPage(browser, { width: 1024, height: 768 });
+  test.beforeAll(async ({ browser }, workerInfo) => {
+    sharedPage = await loadPlanPage(browser, workerInfo);
   });
 
   test.afterAll(async () => {
-    await sharedPage.context().close();
+    await sharedPage?.context().close();
   });
 
   test('Apply Template button is enabled when a by_group group has a template amount', async () => {
@@ -171,28 +196,33 @@ test.describe('Plan screen — Apply Template with group budget', () => {
   });
 });
 
-// ─── Mobile layout ────────────────────────────────────────────────────────────
+// ─── Mobile-specific layout (mobile projects only) ────────────────────────────
+// Verifies mobile-specific rendering: stacked group headers, touch interactions.
+// Skipped on desktop projects where a sidebar is shown instead.
 
 test.describe('Plan screen — group budgeting mobile layout', () => {
   test.describe.configure({ mode: 'serial' });
 
   let sharedPage: Page;
 
-  test.beforeAll(async ({ browser }) => {
-    sharedPage = await loadPlanPage(browser, { width: 390, height: 844 });
+  test.beforeAll(async ({ browser }, workerInfo) => {
+    if (!isMobile(workerInfo)) return;
+    sharedPage = await loadPlanPage(browser, workerInfo);
   });
 
   test.afterAll(async () => {
-    await sharedPage.context().close();
+    await sharedPage?.context().close();
   });
 
-  test('group header shows groupAvailable balance for by_group group', async () => {
+  test('group header shows groupAvailable balance for by_group group', async ({}, workerInfo) => {
+    test.skip(!isMobile(workerInfo), 'Mobile stacked layout only');
     const groupHeader = sharedPage.locator('.group-header', { hasText: TEST_GROUP });
     await expect(groupHeader).toBeVisible({ timeout: 5_000 });
     await expect(groupHeader.locator('.group-total')).toHaveText(/\$[\d,]+/);
   });
 
-  test('Group Envelope row is visible and tappable on mobile', async () => {
+  test('Group Envelope row is visible and tappable on mobile', async ({}, workerInfo) => {
+    test.skip(!isMobile(workerInfo), 'Mobile stacked layout only');
     const envelope = sharedPage.locator('.budget-row--group-envelope').first();
     await expect(envelope).toBeVisible({ timeout: 5_000 });
     await envelope.click();
