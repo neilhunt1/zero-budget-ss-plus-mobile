@@ -69,9 +69,8 @@ test.describe('Plan screen — group budgeting sidebar (desktop)', () => {
   });
 
   test('by_category group does NOT show a G badge', async () => {
-    const otherTabs = sharedPage.locator('.plan-group-tab').filter({
-      hasNot: sharedPage.locator('.plan-group-tab', { hasText: TEST_GROUP }),
-    });
+    // Filter to tabs that do not contain the test group name text
+    const otherTabs = sharedPage.locator('.plan-group-tab').filter({ hasNotText: TEST_GROUP });
     await expect(otherTabs.first()).toBeVisible();
     for (const tab of await otherTabs.all()) {
       await expect(tab.locator('.plan-group-tab-badge')).not.toBeAttached();

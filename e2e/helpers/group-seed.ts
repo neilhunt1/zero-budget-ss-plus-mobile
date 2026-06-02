@@ -55,27 +55,17 @@ async function ensureGroupsHeader(token: string, sheetId: string): Promise<void>
 
 /**
  * Reset every group in the Groups tab back to by_category.
- * Called at the start of seedGroupForTest to ensure a clean baseline —
- * previous test runs or manual sheet edits may have left other groups as by_group.
+ * Uses a single range write (one API call) to avoid hammering the quota.
  */
 async function resetAllGroupsByCategory(token: string, sheetId: string): Promise<void> {
-  const rows = await readValues(token, sheetId, 'Groups!A2:E');
-  if (rows.length === 0) return;
+  const rows = await readValues(token, sheetId, 'Groups!A2:A');
+  const activeCount = rows.filter((r) => r[0]).length;
+  if (activeCount === 0) return;
 
-  const updates = rows
-    .map((row, i) => ({
-      range: `Groups!B${i + 2}`, // budget_type column
-      values: [['by_category']],
-    }))
-    .filter((_, i) => rows[i][0]); // skip blank rows
-
-  if (updates.length === 0) return;
-
-  // Batch all budget_type resets in one API call
-  await Promise.all(
-    updates.map(({ range, values }) => writeValues(token, sheetId, range, values))
-  );
-  console.log(`[group-seed] Reset ${updates.length} group(s) to by_category`);
+  // Single write: overwrite the entire budget_type column in one request
+  const resetValues = Array.from({ length: activeCount }, () => ['by_category']);
+  await writeValues(token, sheetId, `Groups!B2:B${activeCount + 1}`, resetValues);
+  console.log(`[group-seed] Reset ${activeCount} group(s) to by_category`);
 }
 
 /**
