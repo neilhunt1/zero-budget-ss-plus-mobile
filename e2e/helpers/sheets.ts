@@ -5,7 +5,7 @@
 
 const BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
 
-async function sheetsRequest<T>(token: string, path: string, options: RequestInit = {}): Promise<T> {
+async function sheetsRequest<T>(token: string, path: string, options: RequestInit = {}, attempt = 0): Promise<T> {
   const res = await fetch(`${BASE}/${path}`, {
     ...options,
     headers: {
@@ -14,10 +14,22 @@ async function sheetsRequest<T>(token: string, path: string, options: RequestIni
       ...options.headers,
     },
   });
+
+  // 429 — rate limited. Honour Retry-After or use exponential backoff, up to 3 retries.
+  if (res.status === 429 && attempt < 3) {
+    const retryAfter = parseInt(res.headers.get('Retry-After') ?? '0', 10);
+    const delay = retryAfter > 0 ? retryAfter * 1000 : Math.pow(2, attempt + 1) * 1000;
+    console.warn(`[sheets helper] 429 on ${path} — retrying in ${delay}ms (attempt ${attempt + 1}/3)`);
+    await new Promise<void>((resolve) => setTimeout(resolve, delay));
+    return sheetsRequest<T>(token, path, options, attempt + 1);
+  }
+
   if (!res.ok) {
     let msg = `Sheets API ${res.status} on ${path}`;
     try { msg = (await res.json())?.error?.message ?? msg; } catch { /* ignore */ }
-    throw new Error(msg);
+    const err = new Error(msg) as Error & { status: number };
+    err.status = res.status;
+    throw err;
   }
   return res.json() as Promise<T>;
 }

@@ -25,15 +25,21 @@ export function currentMonth(): string {
 
 /**
  * Ensure the Groups tab header row exists and is correct.
- * Graceful no-op if the tab is missing (test will fail later with a clear message).
+ * Throws clearly if the tab is missing (run setup:test).
+ * Only silences true 404 "not found" responses — re-throws everything else (e.g. 429).
  */
 async function ensureGroupsHeader(token: string, sheetId: string): Promise<void> {
   let existing: string[][];
   try {
     existing = await readValues(token, sheetId, 'Groups!A1:E1');
-  } catch {
-    console.warn('[group-seed] Groups tab missing — run `npm run setup:test` first');
-    return;
+  } catch (e) {
+    const status = (e as Error & { status?: number }).status;
+    if (status === 404 || (e as Error).message.includes('not found')) {
+      throw new Error(
+        '[group-seed] Groups tab missing — run `npm run setup:test` before E2E tests'
+      );
+    }
+    throw e; // re-throw 429s and other errors rather than silently swallowing them
   }
 
   const current = existing[0] ?? [];
@@ -48,6 +54,31 @@ async function ensureGroupsHeader(token: string, sheetId: string): Promise<void>
 }
 
 /**
+ * Reset every group in the Groups tab back to by_category.
+ * Called at the start of seedGroupForTest to ensure a clean baseline —
+ * previous test runs or manual sheet edits may have left other groups as by_group.
+ */
+async function resetAllGroupsByCategory(token: string, sheetId: string): Promise<void> {
+  const rows = await readValues(token, sheetId, 'Groups!A2:E');
+  if (rows.length === 0) return;
+
+  const updates = rows
+    .map((row, i) => ({
+      range: `Groups!B${i + 2}`, // budget_type column
+      values: [['by_category']],
+    }))
+    .filter((_, i) => rows[i][0]); // skip blank rows
+
+  if (updates.length === 0) return;
+
+  // Batch all budget_type resets in one API call
+  await Promise.all(
+    updates.map(({ range, values }) => writeValues(token, sheetId, range, values))
+  );
+  console.log(`[group-seed] Reset ${updates.length} group(s) to by_category`);
+}
+
+/**
  * Set a group's budget_type and monthly_template_amount in the Groups tab.
  * Upserts the row (updates if group_name exists, appends if not).
  */
@@ -58,8 +89,6 @@ export async function setGroupBudgetMode(
   budgetType: 'by_group' | 'by_category',
   templateAmount = 0,
 ): Promise<void> {
-  await ensureGroupsHeader(token, sheetId);
-
   const rows = await readValues(token, sheetId, 'Groups!A2:E');
   const rowIdx = rows.findIndex((r) => r[0]?.trim() === groupName);
 
@@ -137,6 +166,10 @@ export async function seedGroupForTest(
   },
 ): Promise<void> {
   const month = opts.month ?? currentMonth();
+  // Reset all groups to by_category first so no stale by_group groups pollute assertions
+  await ensureGroupsHeader(token, sheetId);
+  await resetAllGroupsByCategory(token, sheetId);
+  // Now set only the test group to by_group
   await setGroupBudgetMode(token, sheetId, groupName, 'by_group', opts.templateAmount);
   await clearGroupAssignments(token, sheetId, groupName, month);
   await writeGroupAssignment(token, sheetId, month, groupName, opts.budgetAmount);

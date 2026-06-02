@@ -134,8 +134,8 @@ test.describe('Plan screen — Group Envelope row', () => {
     await expect(sheet).toBeVisible({ timeout: 3_000 });
     await expect(sheet).toContainText(TEST_GROUP);
     await expect(sharedPage.locator('#assign-group-input')).toBeVisible();
-    // Close for next test
-    await sharedPage.keyboard.press('Escape');
+    // Close via Cancel — the overlay has no Escape key handler, backdrop click is the dismiss path
+    await sharedPage.getByRole('button', { name: /^Cancel$/i }).click();
     await expect(sheet).not.toBeAttached({ timeout: 3_000 });
   });
 
