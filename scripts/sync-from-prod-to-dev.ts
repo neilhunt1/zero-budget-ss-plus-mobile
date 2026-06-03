@@ -89,6 +89,7 @@ export function buildTabSpec(tabName: string): TabSpec {
   // Quote tab names that contain spaces so the Sheets API range is valid
   const q = tabName.includes(' ') ? `'${tabName}'` : tabName;
   if (tabName === 'Budget') {
+    // Row 1 is the column header managed by setup:dev — copy only data rows.
     return {
       tabName,
       readRange: `${q}!A2:ZZ`,

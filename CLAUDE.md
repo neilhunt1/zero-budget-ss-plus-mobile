@@ -67,29 +67,45 @@ export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json
 | Tab | Purpose | Editable by scripts |
 |---|---|---|
 | Transactions | All transactions, single source of truth | Yes |
-| Budget | Dashboard header (rows 1-5) + categories (rows 6-506) + assignments (rows 508+) | Yes |
+| Budget | Monthly assignments only (row 1 = headers, rows 2+ = data) | Yes |
+| Categories | Category definitions — **user-owned data, edit directly in sheet** | Seed only (first run) |
+| Dashboard | ReadyToAssign, LastYnabSync, TotalAssigned, TotalAvailable formulas | Yes |
+| Groups | Group budget settings (budget_type, rollover, etc.) | Append-only |
 | Templates | Recurring split templates | Yes |
 | Reflect | Charts and summaries | Read only |
 | BankToSheets_Raw | BankToSheets writes here | No — BTS owned |
 | YNAB_Plan_Import | YNAB Plan CSV pasted here by user | Read only by scripts |
 | YNAB_Transactions_Import | Reserved for M4 YNAB transaction import | Read only by scripts |
 
-### Budget tab layout (IMPORTANT — row offsets matter)
+### Tab layouts
+**Budget tab** (assignments only):
 ```
-Rows 1-5:   Dashboard header (ReadyToAssign, LastYnabSync, TotalAssignedThisMonth, TotalAvailable)
-Row 6:      Category table headers
-Rows 7-506: Category data (500 row buffer — plenty of headroom)
-Row 507:    Visual separator
-Row 508:    Assignment table headers (month, category, assigned, source)
-Row 509+:   Assignment data (grows indefinitely)
+Row 1:   Headers — month | category | assigned | source | category_group
+Rows 2+: Assignment data (grows indefinitely)
 ```
-Constants `ASSIGNMENTS_START_ROW`, `CATEGORY_START_ROW` etc. are defined in `src/api/budget.ts`. Always use these constants — never hardcode row numbers.
+
+**Categories tab** (user-owned):
+```
+Row 1:   Headers — category_group | category_subgroup | category | category_type | monthly_template_amount | sort_order | active
+Rows 2+: Category data (editable directly in the sheet)
+```
+setup-sheet.ts seeds this from `categories.json` only when the tab is empty. After that, the user owns it.
+
+**Dashboard tab**:
+```
+Row 1:   ReadyToAssign  | <live formula>
+Row 2:   LastYnabSync   | <timestamp>
+Row 3:   TotalAssignedThisMonth | <live formula>
+Row 4:   TotalAvailable | <live formula>
+```
+
+Constants `ASSIGNMENTS_START_ROW`, `CATEGORIES_START_ROW` etc. are defined in `src/api/budget.ts`. Always use these constants — never hardcode row numbers.
 
 ### Named ranges
-- `ReadyToAssign` → Budget!B1 (live formula)
-- `LastYnabSync` → Budget!B2 (written by sync-from-ynab)
-- `TotalAssignedThisMonth` → Budget!B3
-- `TotalAvailable` → Budget!B4
+- `ReadyToAssign` → Dashboard!B1 (live formula)
+- `LastYnabSync` → Dashboard!B2 (written by sync-from-ynab)
+- `TotalAssignedThisMonth` → Dashboard!B3
+- `TotalAvailable` → Dashboard!B4
 
 ### Column rules
 - **Always append new columns to the right** — never insert in the middle

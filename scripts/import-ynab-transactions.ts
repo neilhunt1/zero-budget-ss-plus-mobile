@@ -530,35 +530,27 @@ export function parseCsv(csvContent: string): YnabCsvRow[] {
 
 // ─── Category helpers ─────────────────────────────────────────────────────────
 
-interface CategoriesConfig {
-  version: number;
-  groups: Array<{
-    name: string;
-    sort_order?: number;
-    subgroups?: Array<{
-      name: string;
-      sort_order?: number;
-      categories: Array<{ name: string }>;
-    }>;
-    categories?: Array<{ name: string }>;
-  }>;
-}
+const CATEGORIES_START_ROW = 2; // Categories tab: row 1 = headers, data from row 2
+const CATEGORIES_END_ROW = 506;
 
-function loadCategoryIndex(): Map<string, string> {
-  const dataPath = path.resolve(process.cwd(), 'config/categories.json');
-  const data: CategoriesConfig = JSON.parse(fs.readFileSync(dataPath, 'utf-8'));
+/**
+ * Read category names from the Categories tab and build a lookup map.
+ * Maps normalizedName → canonical category name for YNAB export matching.
+ */
+async function loadCategoryIndex(
+  sheets: sheets_v4.Sheets,
+  sheetId: string
+): Promise<Map<string, string>> {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `Categories!C${CATEGORIES_START_ROW}:C${CATEGORIES_END_ROW}`,
+  });
   const map = new Map<string, string>();
-  for (const group of data.groups) {
-    const cats: Array<{ name: string }> = [];
-    if (group.subgroups) {
-      for (const sg of group.subgroups) cats.push(...sg.categories);
-    } else if (group.categories) {
-      cats.push(...group.categories);
-    }
-    for (const cat of cats) {
-      const key = normalizeForMatch(cat.name);
-      if (key) map.set(key, cat.name);
-    }
+  for (const row of res.data.values ?? []) {
+    const category = (row[0] ?? '').trim();
+    if (!category) continue;
+    const key = normalizeForMatch(category);
+    if (key) map.set(key, category);
   }
   return map;
 }
@@ -768,9 +760,9 @@ async function main(): Promise<void> {
   if (filtered > 0) log(`CSV: filtered out ${filtered} rows after cutover date ${cutoverDate}`);
   log(`CSV: ${cutoverRows.length} rows within cutover date`);
 
-  // Load categories
-  const categoryIndex = loadCategoryIndex();
-  log(`Categories: indexed ${categoryIndex.size} entries`);
+  // Load categories from the sheet
+  const categoryIndex = await loadCategoryIndex(sheets, sheetId);
+  log(`Categories: indexed ${categoryIndex.size} entries from sheet`);
 
   // Read existing transactions for dedup
   const existing = await readExistingTransactions(sheets, sheetId);

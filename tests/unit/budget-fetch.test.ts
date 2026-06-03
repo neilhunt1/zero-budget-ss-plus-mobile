@@ -36,7 +36,7 @@ function makeAssignment(overrides: Partial<BudgetAssignment> = {}): BudgetAssign
     category: 'Groceries',
     assigned: 200,
     source: 'manual',
-    _rowIndex: 509,
+    _rowIndex: 2,
     ...overrides,
   };
 }
@@ -196,10 +196,10 @@ describe('fetchMonthAssignments', () => {
 describe('upsertAssignment', () => {
   it('calls updateValues when an existing assignment is provided', async () => {
     const client = mockClient([]);
-    const existing = { month: '2025-04', category: 'Groceries', assigned: 400, source: 'manual', _rowIndex: 510 };
+    const existing = { month: '2025-04', category: 'Groceries', assigned: 400, source: 'manual', _rowIndex: 3 };
     await upsertAssignment(client, '2025-04', 'Groceries', 500, existing);
     expect(client.updateValues).toHaveBeenCalledWith(
-      'Budget!A510:D510',
+      'Budget!A3:D3',
       [['2025-04', 'Groceries', 500, 'manual']]
     );
     expect(client.appendValues).not.toHaveBeenCalled();
@@ -209,7 +209,7 @@ describe('upsertAssignment', () => {
     const client = mockClient([]);
     await upsertAssignment(client, '2025-04', 'Gas', 75);
     expect(client.appendValues).toHaveBeenCalledWith(
-      'Budget!A509',
+      'Budget!A2',
       [['2025-04', 'Gas', 75, 'manual']]
     );
     expect(client.updateValues).not.toHaveBeenCalled();
@@ -362,11 +362,11 @@ describe('applyTemplate', () => {
 
   it('uses batchUpdateValues for categories with an existing assignment', async () => {
     const client = mockClient([]);
-    const existing = makeAssignment({ _rowIndex: 510 });
+    const existing = makeAssignment({ _rowIndex: 3 });
     await applyTemplate(client, '2026-04', [makeCategory()], [existing]);
     expect(client.batchUpdateValues).toHaveBeenCalledWith([
       {
-        range: 'Budget!A510:D510',
+        range: 'Budget!A3:D3',
         values: [['2026-04', 'Groceries', 500, 'template']],
       },
     ]);
@@ -382,11 +382,11 @@ describe('applyTemplate', () => {
       makeCategory({ category: 'Groceries', monthly_template_amount: 500 }),
       makeCategory({ category: 'Gas', monthly_template_amount: 100 }),
     ];
-    const existing = makeAssignment({ category: 'Groceries', _rowIndex: 510 });
+    const existing = makeAssignment({ category: 'Groceries', _rowIndex: 3 });
     await applyTemplate(client, '2026-04', cats, [existing]);
 
     expect(client.batchUpdateValues).toHaveBeenCalledWith([
-      { range: 'Budget!A510:D510', values: [['2026-04', 'Groceries', 500, 'template']] },
+      { range: 'Budget!A3:D3', values: [['2026-04', 'Groceries', 500, 'template']] },
     ]);
     expect(client.appendValues).toHaveBeenCalledWith(
       expect.stringContaining('Budget!'),

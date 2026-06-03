@@ -70,26 +70,6 @@ function parseCsvFile(content: string): string[][] {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface CategoriesConfig {
-  version: number;
-  groups: Array<{
-    name: string;
-    sort_order?: number;
-    subgroups?: Array<{
-      name: string;
-      sort_order?: number;
-      categories: Array<{ name: string; type: string; template?: number; sort_order?: number; active?: boolean }>;
-    }>;
-    categories?: Array<{ name: string; type: string; template?: number; sort_order?: number; active?: boolean }>;
-  }>;
-}
-
-interface FlatCategory {
-  group: string;
-  subgroup: string;
-  category: string;
-}
-
 export interface AccountBalance {
   account: string;
   balance: number;
@@ -97,7 +77,7 @@ export interface AccountBalance {
 
 export interface YnabPlanRow {
   month: string;    // YYYY-MM
-  category: string; // canonical name from categories.json
+  category: string; // canonical name from Categories tab
   assigned: number;
 }
 
@@ -108,8 +88,10 @@ type AuthConfig =
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 // Must stay in sync with setup-sheet.ts
-const BUDGET_ASSIGNMENTS_START_ROW = 508; // header row
-const BUDGET_ASSIGNMENTS_DATA_ROW = BUDGET_ASSIGNMENTS_START_ROW + 1;
+const BUDGET_ASSIGNMENTS_START_ROW = 1; // header row (Budget tab, v7 layout)
+const BUDGET_ASSIGNMENTS_DATA_ROW = BUDGET_ASSIGNMENTS_START_ROW + 1; // 2
+const CATEGORIES_START_ROW = 2; // Categories tab: row 1 = headers, data from row 2
+const CATEGORIES_END_ROW = 506;
 
 const SKIP_GROUPS = new Set(['Credit Card Payments']);
 
@@ -227,32 +209,25 @@ export function applyYnabAssignments(
 
 // ─── Categories helpers ───────────────────────────────────────────────────────
 
-function loadFlatCategories(): FlatCategory[] {
-  const dataPath = path.resolve(process.cwd(), 'config/categories.json');
-  const data: CategoriesConfig = JSON.parse(fs.readFileSync(dataPath, 'utf-8'));
-  const flat: FlatCategory[] = [];
-  for (const group of data.groups) {
-    if (group.subgroups) {
-      for (const sg of group.subgroups) {
-        for (const cat of sg.categories) {
-          flat.push({ group: group.name, subgroup: sg.name, category: cat.name });
-        }
-      }
-    } else if (group.categories) {
-      for (const cat of group.categories) {
-        flat.push({ group: group.name, subgroup: '', category: cat.name });
-      }
-    }
-  }
-  return flat;
-}
-
-/** Build map: normalizedName → FlatCategory for fast lookup. */
-function buildCategoryIndex(flat: FlatCategory[]): Map<string, FlatCategory> {
-  const map = new Map<string, FlatCategory>();
-  for (const fc of flat) {
-    const key = normalizeForMatch(fc.category);
-    if (key) map.set(key, fc);
+/**
+ * Read category names from the Categories tab and build a lookup map.
+ * Maps normalizedName → canonical category name for YNAB export matching.
+ */
+async function loadCategoryIndex(
+  sheets: sheets_v4.Sheets,
+  sheetId: string
+): Promise<Map<string, string>> {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    // Columns: category_group(A), subgroup(B), category(C)
+    range: `Categories!C${CATEGORIES_START_ROW}:C${CATEGORIES_END_ROW}`,
+  });
+  const map = new Map<string, string>();
+  for (const row of res.data.values ?? []) {
+    const category = (row[0] ?? '').trim();
+    if (!category) continue;
+    const key = normalizeForMatch(category);
+    if (key) map.set(key, category);
   }
   return map;
 }
@@ -321,7 +296,7 @@ function loadEnv(): { sheetId: string; authConfig: AuthConfig } {
 async function readYnabPlan(
   sheets: sheets_v4.Sheets,
   sheetId: string,
-  categoryIndex: Map<string, FlatCategory>,
+  categoryIndex: Map<string, string>,
   filePath: string | null
 ): Promise<YnabPlanRow[]> {
   let rows: string[][];
@@ -386,13 +361,13 @@ async function readYnabPlan(
     }
 
     const normalized = normalizeForMatch(ynabCategory);
-    const fc = categoryIndex.get(normalized);
-    if (!fc) {
+    const canonicalName = categoryIndex.get(normalized);
+    if (!canonicalName) {
       unmatchedCategories.set(ynabCategory, (unmatchedCategories.get(ynabCategory) ?? 0) + 1);
       continue;
     }
 
-    results.push({ month, category: fc.category, assigned: parseYnabAmount(rawAssigned) });
+    results.push({ month, category: canonicalName, assigned: parseYnabAmount(rawAssigned) });
   }
 
   const unmatchedRowCount = [...unmatchedCategories.values()].reduce((a, b) => a + b, 0);
@@ -553,7 +528,7 @@ async function wipeAndRewriteSeedTransactions(
   }
 }
 
-/** Update the LastYnabSync cell in the Budget dashboard. */
+/** Update the LastYnabSync cell in the Dashboard tab. */
 async function writeLastYnabSync(
   sheets: sheets_v4.Sheets,
   sheetId: string,
@@ -561,7 +536,7 @@ async function writeLastYnabSync(
 ): Promise<void> {
   await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId,
-    range: 'Budget!B2', // LastYnabSync named range cell
+    range: 'Dashboard!B2', // LastYnabSync named range cell
     valueInputOption: 'RAW',
     requestBody: { values: [[timestamp]] },
   });
@@ -622,9 +597,8 @@ async function main(): Promise<void> {
   });
   const sheetMeta = spreadsheet.data.sheets ?? [];
 
-  const flatCategories = loadFlatCategories();
-  const categoryIndex = buildCategoryIndex(flatCategories);
-  log(`Categories: indexed ${categoryIndex.size} entries`);
+  const categoryIndex = await loadCategoryIndex(sheets, sheetId);
+  log(`Categories: indexed ${categoryIndex.size} entries from sheet`);
 
   // Step 1: read YNAB Plan (local file if available, sheet tab as fallback)
   if (planFilePath) log(`Plan CSV: reading from ${planFilePath}`);

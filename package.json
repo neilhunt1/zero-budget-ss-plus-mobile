@@ -10,7 +10,6 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",
-    "validate:categories": "ts-node --project tsconfig.scripts.json scripts/validate-categories.ts",
     "setup:dev": "ts-node --project tsconfig.scripts.json scripts/setup-sheet.ts --env dev",
     "setup:prod": "ts-node --project tsconfig.scripts.json scripts/setup-sheet.ts --env prod",
     "import:ynab:plan:dev": "ts-node --project tsconfig.scripts.json scripts/sync-from-ynab.ts --env dev",
@@ -28,8 +27,6 @@
   },
   "dependencies": {
     "@react-oauth/google": "^0.12.1",
-    "ajv": "^8.17.1",
-    "ajv-formats": "^3.0.1",
     "dexie": "^4.4.2",
     "dexie-react-hooks": "^4.4.0",
     "dotenv": "^16.4.5",
