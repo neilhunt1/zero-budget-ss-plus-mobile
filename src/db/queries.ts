@@ -2,6 +2,16 @@ import { db } from './schema';
 import { buildGroupedBudget } from '../api/budget';
 import type { Transaction, BudgetCategory, BudgetAssignment, GroupedBudget } from '../types';
 
+export async function getTransactionsByDateRange(startDate: string, endDate: string): Promise<Transaction[]> {
+  const results = await db.transactions
+    .where('date')
+    .between(startDate, endDate, true, true)
+    .toArray();
+  return results
+    .filter((t) => !t.parent_id)
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
 export async function getTransactionsByMonth(month: string): Promise<Transaction[]> {
   const results = await db.transactions
     .where('date')
