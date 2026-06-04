@@ -74,10 +74,11 @@ test.describe('time range presets', () => {
 
 test.describe('bar chart — Last Month (May 2026 seed data)', () => {
   test.beforeEach(async ({ page }) => {
+    test.setTimeout(60_000); // sync can take 20-30s; give headroom
     await selectPreset(page, 'Last Month');
     await switchToBar(page);
     // Wait for actual group data — this blocks until sync completes and data populates
-    await expect(page.getByTestId('hbar-group').first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('hbar-group').first()).toBeVisible({ timeout: 50_000 });
   });
 
   test('shows the correct number of groups', async ({ page }) => {
@@ -126,10 +127,11 @@ test.describe('bar chart — Last Month (May 2026 seed data)', () => {
 
 test.describe('pie chart — Last Month (May 2026 seed data)', () => {
   test.beforeEach(async ({ page }) => {
+    test.setTimeout(60_000); // sync can take 20-30s; give headroom
     await selectPreset(page, 'Last Month');
     await switchToPie(page);
     // Wait for actual group rows — this blocks until sync + data are ready
-    await expect(page.getByTestId('pie-group-row').first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('pie-group-row').first()).toBeVisible({ timeout: 50_000 });
   });
 
   test('shows total spend in the summary label', async ({ page }) => {
@@ -167,9 +169,10 @@ test.describe('pie chart — Last Month (May 2026 seed data)', () => {
 
 test.describe('chart type toggle', () => {
   test('switches between pie and bar', async ({ page }) => {
+    test.setTimeout(60_000);
     await selectPreset(page, 'Last Month');
     // Wait for pie data before testing toggle
-    await expect(page.getByTestId('pie-group-row').first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('pie-group-row').first()).toBeVisible({ timeout: 50_000 });
 
     await expect(page.getByTestId('pie-chart')).toBeVisible();
     await expect(page.getByTestId('hbar-chart')).not.toBeAttached();
