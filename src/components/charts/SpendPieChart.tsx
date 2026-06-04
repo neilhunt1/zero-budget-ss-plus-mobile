@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import type { GroupSpend } from '../../api/spending';
 
@@ -57,6 +57,14 @@ const border = '1px solid var(--border)';
 export default function SpendPieChart({ data, totalSpend }: Props) {
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [isWide, setIsWide] = useState(() => window.innerWidth >= 640);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 640px)');
+    const handler = (e: MediaQueryListEvent) => setIsWide(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   if (data.length === 0) {
     return <div className="state-msg">No spending data for this period.</div>;
@@ -75,10 +83,15 @@ export default function SpendPieChart({ data, totalSpend }: Props) {
   }
 
   return (
-    <div data-testid="pie-chart" style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', padding: '12px 0 0' }}>
+    <div data-testid="pie-chart" style={{
+      display: 'flex',
+      flexDirection: isWide ? 'row' : 'column',
+      alignItems: 'flex-start',
+      padding: '12px 0 0',
+    }}>
 
-      {/* Left: pie chart */}
-      <div style={{ flex: '0 0 44%', maxWidth: '44%', minWidth: 0 }}>
+      {/* Chart */}
+      <div style={isWide ? { flex: '0 0 44%', maxWidth: '44%', minWidth: 0 } : { width: '100%' }}>
         <ResponsiveContainer width="100%" height={300}>
           <PieChart margin={{ top: 16, right: 24, bottom: 8, left: 24 }}>
             <Pie
@@ -112,8 +125,11 @@ export default function SpendPieChart({ data, totalSpend }: Props) {
         </div>
       </div>
 
-      {/* Right: group list with expandable subgroups + categories */}
-      <div style={{ flex: 1, minWidth: 0, borderLeft: border, overflowY: 'auto' }}>
+      {/* Group list — right of chart on wide screens, below on mobile */}
+      <div style={isWide
+        ? { flex: 1, minWidth: 0, borderLeft: border, overflowY: 'auto' }
+        : { width: '100%', borderTop: border }
+      }>
         {data.map((row, i) => {
           const isActive = activeGroup === row.group;
           const isExpanded = expanded.has(row.group);

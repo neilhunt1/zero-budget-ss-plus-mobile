@@ -252,10 +252,6 @@ export default function Reflect() {
 
   return (
     <div className="screen reflect-screen" data-testid="reflect-screen">
-      <header className="screen-header">
-        <h2 className="screen-title">Reflect</h2>
-      </header>
-
       {/* Time range chips + date range label */}
       <div className="reflect-presets">
         {(Object.keys(PRESET_LABELS) as TimeRangePreset[]).map((p) => (
