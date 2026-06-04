@@ -164,7 +164,7 @@ vi.mock('../../src/api/budget', async (importOriginal) => {
 });
 
 vi.mock('../../src/api/client', () => ({
-  SheetsClient: vi.fn().mockImplementation(() => ({})),
+  SheetsClient: vi.fn(), // vi.fn() is constructable; arrow fns are not (breaks vitest 4.x)
 }));
 
 vi.mock('../../src/api/bts', () => ({
