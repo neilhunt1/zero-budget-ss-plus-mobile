@@ -31,7 +31,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import { google, sheets_v4 } from 'googleapis';
-import { upsertConfigValue } from './setup-sheet';
+import { upsertConfigValue } from './config-tab';
 
 // ─── CSV parsing ──────────────────────────────────────────────────────────────
 

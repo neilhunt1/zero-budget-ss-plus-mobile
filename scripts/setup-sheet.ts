@@ -665,21 +665,25 @@ async function writeBudgetDashboard(
 // Current keys:
 //   live_sync_from_date  — first date owned by live sync (BTS/Plaid). Set by
 //                          import scripts when --cutover-date is passed.
+//
+// upsertConfigValue lives in config-tab.ts (imported here and re-exported so
+// callers don't need to import setup-sheet.ts, which has an unguarded main()).
 
-export const CONFIG_TAB = "Config";
-export const CONFIG_HEADERS = ["key", "value"];
+export { upsertConfigValue } from "./config-tab";
+
+const CONFIG_HEADERS = ["key", "value"];
 
 async function writeConfigHeaders(
   sheets: sheets_v4.Sheets,
   sheetId: string,
   sheetMeta: sheets_v4.Schema$Sheet[]
 ): Promise<void> {
-  const meta = findSheet(sheetMeta, CONFIG_TAB);
+  const meta = findSheet(sheetMeta, "Config");
   if (!meta) return;
 
   const existing = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: `${CONFIG_TAB}!A1:B1`,
+    range: `Config!A1:B1`,
   });
 
   if (existing.data.values?.[0]?.[0] === "key") {
@@ -689,51 +693,12 @@ async function writeConfigHeaders(
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId,
-    range: `${CONFIG_TAB}!A1`,
+    range: `Config!A1`,
     valueInputOption: "RAW",
     requestBody: { values: [CONFIG_HEADERS] },
   });
 
   log("Config: wrote headers (key | value)");
-}
-
-/**
- * Upsert a key/value pair in the Config tab.
- * Exported so import scripts can call it directly without going through setup.
- */
-export async function upsertConfigValue(
-  sheets: sheets_v4.Sheets,
-  sheetId: string,
-  key: string,
-  value: string
-): Promise<void> {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: `${CONFIG_TAB}!A2:B`,
-  });
-  const rows = res.data.values ?? [];
-
-  for (let i = 0; i < rows.length; i++) {
-    if (rows[i][0] === key) {
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: sheetId,
-        range: `${CONFIG_TAB}!B${i + 2}`,
-        valueInputOption: "RAW",
-        requestBody: { values: [[value]] },
-      });
-      log(`Config: updated ${key} = ${value}`);
-      return;
-    }
-  }
-
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: sheetId,
-    range: `${CONFIG_TAB}!A2`,
-    valueInputOption: "RAW",
-    insertDataOption: "INSERT_ROWS",
-    requestBody: { values: [[key, value]] },
-  });
-  log(`Config: inserted ${key} = ${value}`);
 }
 
 /**

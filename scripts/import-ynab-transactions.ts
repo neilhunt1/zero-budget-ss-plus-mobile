@@ -29,7 +29,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { google, sheets_v4 } from 'googleapis';
-import { upsertConfigValue } from './setup-sheet';
+import { upsertConfigValue } from './config-tab';
 import { nextDay } from './sync-from-ynab';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -699,22 +699,33 @@ async function deleteTransactionsBeforeCutover(
     return;
   }
 
-  const deleteRequests: sheets_v4.Schema$Request[] = rowsToDelete.map((rowIndex) => ({
-    deleteDimension: {
-      range: {
-        sheetId: txSheetId,
-        dimension: 'ROWS',
-        startIndex: rowIndex - 1, // 0-based
-        endIndex: rowIndex,
+  // Chunk deletions to stay within Google Sheets API payload limits.
+  // Each chunk is sent as a separate batchUpdate. Rows are already in descending
+  // order, so each chunk is safe to apply independently without index shifting
+  // (higher indices are deleted first within each chunk, and chunks are also
+  // processed highest-first since we chunk from the front of the sorted array).
+  const CHUNK_SIZE = 500;
+  let deleted = 0;
+  for (let i = 0; i < rowsToDelete.length; i += CHUNK_SIZE) {
+    const chunk = rowsToDelete.slice(i, i + CHUNK_SIZE);
+    const requests: sheets_v4.Schema$Request[] = chunk.map((rowIndex) => ({
+      deleteDimension: {
+        range: {
+          sheetId: txSheetId,
+          dimension: 'ROWS',
+          startIndex: rowIndex - 1, // 0-based
+          endIndex: rowIndex,
+        },
       },
-    },
-  }));
-
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: sheetId,
-    requestBody: { requests: deleteRequests },
-  });
-  log(`Transactions: deleted ${rowsToDelete.length} row(s) on or before ${cutoverDate}`);
+    }));
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: { requests },
+    });
+    deleted += chunk.length;
+    log(`Transactions: deleted ${deleted}/${rowsToDelete.length} rows…`);
+  }
+  log(`Transactions: finished deleting ${rowsToDelete.length} row(s) on or before ${cutoverDate}`);
 }
 
 // ─── Logging & error helpers ──────────────────────────────────────────────────
