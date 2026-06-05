@@ -654,92 +654,64 @@ async function readExistingTransactions(
 }
 
 /**
- * Delete only non-ynab_import transaction rows with date <= cutoverDate.
- * This removes BTS/manual rows in the pre-cutover window (the overlap problem)
- * while leaving already-imported YNAB rows in place so re-runs are fast —
- * the external_id dedup in the insert phase skips rows already present.
+ * Remove non-ynab_import rows with date <= cutoverDate using a read-filter-rewrite
+ * strategy: read all rows, drop the unwanted ones in memory, clear the sheet,
+ * write back the survivors. This is always 3 API calls regardless of row count —
+ * far more reliable than issuing one deleteDimension request per row.
  *
- * Deletions happen in reverse row order to avoid index shifting.
+ * ynab_import rows are left in place so re-runs are fast (external_id dedup
+ * in the insert phase skips rows already present).
  */
-async function deleteNonYnabTransactionsBeforeCutover(
+async function removeNonYnabTransactionsBeforeCutover(
   sheets: sheets_v4.Sheets,
   sheetId: string,
   cutoverDate: string,
 ): Promise<void> {
-  const spreadsheet = await sheets.spreadsheets.get({
-    spreadsheetId: sheetId,
-    fields: 'sheets(properties(sheetId,title))',
-  });
-  const txSheet = (spreadsheet.data.sheets ?? []).find(
-    (s) => s.properties?.title === 'Transactions',
-  );
-  if (!txSheet) {
-    log('Transactions tab not found — skipping pre-cutover delete');
-    return;
-  }
-  const txSheetId = txSheet.properties?.sheetId!;
-
   const dateColIndex = TRANSACTIONS_COLUMNS.indexOf('date');
   const sourceColIndex = TRANSACTIONS_COLUMNS.indexOf('source');
 
-  // Read date and source columns together
-  const startCol = Math.min(dateColIndex, sourceColIndex);
-  const endCol = Math.max(dateColIndex, sourceColIndex);
-  const startLetter = String.fromCharCode(65 + startCol);
-  const endLetter = String.fromCharCode(65 + endCol);
+  // 1. Read all data rows
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: `Transactions!${startLetter}2:${endLetter}`,
+    range: 'Transactions!A2:Z',
   });
-  const rawRows = res.data.values ?? [];
-
-  // Re-map to date/source regardless of which column comes first
-  const dateOffset = dateColIndex - startCol;
-  const sourceOffset = sourceColIndex - startCol;
-
-  const rowsToDelete: number[] = [];
-  for (let i = 0; i < rawRows.length; i++) {
-    const date = (rawRows[i]?.[dateOffset] ?? '').trim();
-    const source = (rawRows[i]?.[sourceOffset] ?? '').trim();
-    if (date && date <= cutoverDate && source !== 'ynab_import') {
-      rowsToDelete.push(i + 2); // 1-based, offset by header row
-    }
-  }
-
-  rowsToDelete.sort((a, b) => b - a); // descending for safe deletion
-
-  if (rowsToDelete.length === 0) {
-    log(`Transactions: no non-ynab_import rows on or before ${cutoverDate} to delete`);
+  const allRows = res.data.values ?? [];
+  if (allRows.length === 0) {
+    log('Transactions: sheet is empty, nothing to clean');
     return;
   }
 
-  // Chunk deletions to stay within Google Sheets API payload limits.
-  // Each chunk is sent as a separate batchUpdate. Rows are already in descending
-  // order, so each chunk is safe to apply independently without index shifting
-  // (higher indices are deleted first within each chunk, and chunks are also
-  // processed highest-first since we chunk from the front of the sorted array).
-  const CHUNK_SIZE = 500;
-  let deleted = 0;
-  for (let i = 0; i < rowsToDelete.length; i += CHUNK_SIZE) {
-    const chunk = rowsToDelete.slice(i, i + CHUNK_SIZE);
-    const requests: sheets_v4.Schema$Request[] = chunk.map((rowIndex) => ({
-      deleteDimension: {
-        range: {
-          sheetId: txSheetId,
-          dimension: 'ROWS',
-          startIndex: rowIndex - 1, // 0-based
-          endIndex: rowIndex,
-        },
-      },
-    }));
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: sheetId,
-      requestBody: { requests },
-    });
-    deleted += chunk.length;
-    log(`Transactions: deleted ${deleted}/${rowsToDelete.length} rows…`);
+  // 2. Filter in memory — keep rows that are NOT (pre-cutover AND non-ynab_import)
+  const keptRows = allRows.filter((row) => {
+    const date = (row[dateColIndex] ?? '').trim();
+    const source = (row[sourceColIndex] ?? '').trim();
+    const isPreCutover = date && date <= cutoverDate;
+    const isNonYnab = source !== 'ynab_import';
+    return !(isPreCutover && isNonYnab);
+  });
+
+  const removedCount = allRows.length - keptRows.length;
+  if (removedCount === 0) {
+    log(`Transactions: no non-ynab_import rows on or before ${cutoverDate} — nothing to remove`);
+    return;
   }
-  log(`Transactions: finished deleting ${rowsToDelete.length} non-ynab_import row(s) on or before ${cutoverDate}`);
+
+  // 3. Clear data rows and write back survivors — 2 API calls total
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId: sheetId,
+    range: 'Transactions!A2:Z',
+  });
+
+  if (keptRows.length > 0) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: 'Transactions!A2',
+      valueInputOption: 'RAW',
+      requestBody: { values: keptRows },
+    });
+  }
+
+  log(`Transactions: removed ${removedCount} non-ynab_import row(s) on or before ${cutoverDate}, kept ${keptRows.length}`);
 }
 
 // ─── Logging & error helpers ──────────────────────────────────────────────────
@@ -781,11 +753,11 @@ async function main(): Promise<void> {
   if (filtered > 0) log(`CSV: filtered out ${filtered} rows after cutover date ${cutoverDate}`);
   log(`CSV: ${cutoverRows.length} rows within cutover date`);
 
-  // Delete non-ynab_import rows on or before cutover date (BTS, manual, seed).
+  // Remove non-ynab_import rows on or before cutover date (BTS, manual, seed).
   // Existing ynab_import rows are left in place — the external_id dedup below
   // will skip them, making re-runs fast (only the delta gets inserted).
   log(`Cutover mode: removing non-YNAB rows on or before ${cutoverDate}`);
-  await deleteNonYnabTransactionsBeforeCutover(sheets, sheetId, cutoverDate);
+  await removeNonYnabTransactionsBeforeCutover(sheets, sheetId, cutoverDate);
 
   // Load categories from the sheet
   const categoryIndex = await loadCategoryIndex(sheets, sheetId);
