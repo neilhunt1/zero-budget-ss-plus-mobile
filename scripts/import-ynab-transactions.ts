@@ -654,11 +654,14 @@ async function readExistingTransactions(
 }
 
 /**
- * Delete all transaction rows with date <= cutoverDate (any source).
- * Used before importing YNAB history so there is no overlap between YNAB and BTS.
+ * Delete only non-ynab_import transaction rows with date <= cutoverDate.
+ * This removes BTS/manual rows in the pre-cutover window (the overlap problem)
+ * while leaving already-imported YNAB rows in place so re-runs are fast —
+ * the external_id dedup in the insert phase skips rows already present.
+ *
  * Deletions happen in reverse row order to avoid index shifting.
  */
-async function deleteTransactionsBeforeCutover(
+async function deleteNonYnabTransactionsBeforeCutover(
   sheets: sheets_v4.Sheets,
   sheetId: string,
   cutoverDate: string,
@@ -677,25 +680,36 @@ async function deleteTransactionsBeforeCutover(
   const txSheetId = txSheet.properties?.sheetId!;
 
   const dateColIndex = TRANSACTIONS_COLUMNS.indexOf('date');
-  const dateColLetter = String.fromCharCode(65 + dateColIndex);
+  const sourceColIndex = TRANSACTIONS_COLUMNS.indexOf('source');
 
+  // Read date and source columns together
+  const startCol = Math.min(dateColIndex, sourceColIndex);
+  const endCol = Math.max(dateColIndex, sourceColIndex);
+  const startLetter = String.fromCharCode(65 + startCol);
+  const endLetter = String.fromCharCode(65 + endCol);
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: `Transactions!${dateColLetter}2:${dateColLetter}`,
+    range: `Transactions!${startLetter}2:${endLetter}`,
   });
-  const dateValues = res.data.values ?? [];
+  const rawRows = res.data.values ?? [];
+
+  // Re-map to date/source regardless of which column comes first
+  const dateOffset = dateColIndex - startCol;
+  const sourceOffset = sourceColIndex - startCol;
 
   const rowsToDelete: number[] = [];
-  for (let i = 0; i < dateValues.length; i++) {
-    const date = (dateValues[i]?.[0] ?? '').trim();
-    if (date && date <= cutoverDate) {
+  for (let i = 0; i < rawRows.length; i++) {
+    const date = (rawRows[i]?.[dateOffset] ?? '').trim();
+    const source = (rawRows[i]?.[sourceOffset] ?? '').trim();
+    if (date && date <= cutoverDate && source !== 'ynab_import') {
       rowsToDelete.push(i + 2); // 1-based, offset by header row
     }
   }
+
   rowsToDelete.sort((a, b) => b - a); // descending for safe deletion
 
   if (rowsToDelete.length === 0) {
-    log(`Transactions: no rows on or before ${cutoverDate} to delete`);
+    log(`Transactions: no non-ynab_import rows on or before ${cutoverDate} to delete`);
     return;
   }
 
@@ -725,7 +739,7 @@ async function deleteTransactionsBeforeCutover(
     deleted += chunk.length;
     log(`Transactions: deleted ${deleted}/${rowsToDelete.length} rows…`);
   }
-  log(`Transactions: finished deleting ${rowsToDelete.length} row(s) on or before ${cutoverDate}`);
+  log(`Transactions: finished deleting ${rowsToDelete.length} non-ynab_import row(s) on or before ${cutoverDate}`);
 }
 
 // ─── Logging & error helpers ──────────────────────────────────────────────────
@@ -767,10 +781,11 @@ async function main(): Promise<void> {
   if (filtered > 0) log(`CSV: filtered out ${filtered} rows after cutover date ${cutoverDate}`);
   log(`CSV: ${cutoverRows.length} rows within cutover date`);
 
-  // Delete all existing transactions on or before cutover date (any source).
-  // This replaces BTS/manual rows in the pre-cutover window with YNAB's authoritative data.
-  log(`Cutover mode: deleting all transactions on or before ${cutoverDate}`);
-  await deleteTransactionsBeforeCutover(sheets, sheetId, cutoverDate);
+  // Delete non-ynab_import rows on or before cutover date (BTS, manual, seed).
+  // Existing ynab_import rows are left in place — the external_id dedup below
+  // will skip them, making re-runs fast (only the delta gets inserted).
+  log(`Cutover mode: removing non-YNAB rows on or before ${cutoverDate}`);
+  await deleteNonYnabTransactionsBeforeCutover(sheets, sheetId, cutoverDate);
 
   // Load categories from the sheet
   const categoryIndex = await loadCategoryIndex(sheets, sheetId);
