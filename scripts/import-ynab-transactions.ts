@@ -149,7 +149,16 @@ export function shortHash(...parts: string[]): string {
 
 /**
  * Generate a stable external_id for a YNAB CSV row.
- * Incorporates all fields that distinguish one row from another.
+ *
+ * Deliberately excludes memo: memos are frequently edited in YNAB after a
+ * transaction is imported, and including them would produce a new hash on
+ * re-import, causing duplicate rows in BTSZB. Account + date + payee +
+ * amounts are stable identifiers — they reflect what the bank reported and
+ * are almost never changed.
+ *
+ * Known edge case: two identical transactions on the same day (same account,
+ * payee, amount) produce the same hash. This is rare in practice and no worse
+ * than the duplicate problem it avoids.
  */
 export function generateExternalId(
   account: string,
@@ -157,9 +166,8 @@ export function generateExternalId(
   payee: string,
   rawOutflow: string,
   rawInflow: string,
-  memo: string,
 ): string {
-  return `YNAB-${shortHash(account, date, payee, rawOutflow, rawInflow, memo)}`;
+  return `YNAB-${shortHash(account, date, payee, rawOutflow, rawInflow)}`;
 }
 
 /**
@@ -259,7 +267,7 @@ export function buildSplitParentRow(
   const totalInflow = group.reduce((s, r) => s + r.inflow, 0);
 
   const childExternalIds = group.map((r) =>
-    generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.memo),
+    generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow),
   );
   const groupHash = shortHash(...childExternalIds);
   const accountSafe = first.account.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
@@ -305,7 +313,7 @@ export function buildSplitChildRows(
   categoryIndex: Map<string, string>,
 ): string[][] {
   return group.map((r) => {
-    const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.memo);
+    const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow);
     const canonicalCategory = resolveCategory(r.category, categoryIndex);
     const cleanMemo = stripSplitIndicator(r.memo);
 
@@ -344,7 +352,7 @@ export function buildRegularTransactionRow(
   importedAt: string,
   categoryIndex: Map<string, string>,
 ): string[] {
-  const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.memo);
+  const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow);
   const canonicalCategory = resolveCategory(r.category, categoryIndex);
 
   const row = new Array<string>(TRANSACTIONS_COLUMNS.length).fill('');
@@ -809,7 +817,7 @@ async function main(): Promise<void> {
       }
     } else {
       const r = group.rows[0];
-      const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.memo);
+      const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow);
 
       if (checkDedup(externalId, existing) === 'skip') {
         skipped++;

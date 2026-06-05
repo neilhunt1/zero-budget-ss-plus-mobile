@@ -620,19 +620,25 @@ describe('parseCsv', () => {
 
 describe('generateExternalId', () => {
   it('produces same id for same inputs', () => {
-    const id1 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00', 'Split (1/9)');
-    const id2 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00', 'Split (1/9)');
+    const id1 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00');
+    const id2 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00');
     expect(id1).toBe(id2);
   });
 
-  it('produces different id when memo differs', () => {
-    const id1 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00', 'Split (1/9)');
-    const id2 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00', 'Split (2/9)');
+  it('produces same id when only memo differs (memo is excluded from hash)', () => {
+    const id1 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00');
+    const id2 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00');
+    expect(id1).toBe(id2);
+  });
+
+  it('produces different id when amount differs', () => {
+    const id1 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00');
+    const id2 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.29', '.00');
     expect(id1).not.toBe(id2);
   });
 
   it('starts with "YNAB-"', () => {
-    const id = generateExternalId('Savings', '2026-04-13', 'Test', '.00', '.00', '');
+    const id = generateExternalId('Savings', '2026-04-13', 'Test', '.00', '.00');
     expect(id).toMatch(/^YNAB-/);
   });
 });
