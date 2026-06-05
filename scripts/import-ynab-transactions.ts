@@ -49,6 +49,8 @@ export interface YnabCsvRow {
   outflow: number;
   inflow: number;
   cleared: string;
+  /** 0-based count of how many prior rows share the same account+date+payee+outflow+inflow. */
+  occurrenceIndex: number;
 }
 
 export interface ExistingTransactionSummary {
@@ -151,14 +153,13 @@ export function shortHash(...parts: string[]): string {
  * Generate a stable external_id for a YNAB CSV row.
  *
  * Deliberately excludes memo: memos are frequently edited in YNAB after a
- * transaction is imported, and including them would produce a new hash on
- * re-import, causing duplicate rows in BTSZB. Account + date + payee +
- * amounts are stable identifiers — they reflect what the bank reported and
- * are almost never changed.
+ * transaction is imported, and including them in the hash would produce a new
+ * id on re-import, causing duplicate rows in BTSZB.
  *
- * Known edge case: two identical transactions on the same day (same account,
- * payee, amount) produce the same hash. This is rare in practice and no worse
- * than the duplicate problem it avoids.
+ * occurrenceIndex disambiguates truly identical transactions on the same day
+ * (same account, payee, and amounts — e.g. two $1.70 Dunkin' purchases).
+ * YNAB exports rows in a stable order, so the first occurrence always gets
+ * index 0, the second index 1, etc., making the id stable across re-imports.
  */
 export function generateExternalId(
   account: string,
@@ -166,8 +167,9 @@ export function generateExternalId(
   payee: string,
   rawOutflow: string,
   rawInflow: string,
+  occurrenceIndex: number,
 ): string {
-  return `YNAB-${shortHash(account, date, payee, rawOutflow, rawInflow)}`;
+  return `YNAB-${shortHash(account, date, payee, rawOutflow, rawInflow, String(occurrenceIndex))}`;
 }
 
 /**
@@ -267,7 +269,7 @@ export function buildSplitParentRow(
   const totalInflow = group.reduce((s, r) => s + r.inflow, 0);
 
   const childExternalIds = group.map((r) =>
-    generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow),
+    generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.occurrenceIndex),
   );
   const groupHash = shortHash(...childExternalIds);
   const accountSafe = first.account.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
@@ -313,7 +315,7 @@ export function buildSplitChildRows(
   categoryIndex: Map<string, string>,
 ): string[][] {
   return group.map((r) => {
-    const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow);
+    const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.occurrenceIndex);
     const canonicalCategory = resolveCategory(r.category, categoryIndex);
     const cleanMemo = stripSplitIndicator(r.memo);
 
@@ -352,7 +354,7 @@ export function buildRegularTransactionRow(
   importedAt: string,
   categoryIndex: Map<string, string>,
 ): string[] {
-  const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow);
+  const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.occurrenceIndex);
   const canonicalCategory = resolveCategory(r.category, categoryIndex);
 
   const row = new Array<string>(TRANSACTIONS_COLUMNS.length).fill('');
@@ -500,6 +502,9 @@ export function parseCsv(csvContent: string): YnabCsvRow[] {
   }
 
   const rows: YnabCsvRow[] = [];
+  // Tracks how many times each (account|date|payee|outflow|inflow) key has
+  // appeared so far, to assign a stable occurrence index to each row.
+  const occurrenceCounts = new Map<string, number>();
   let skipped = 0;
 
   for (let i = 1; i < lines.length; i++) {
@@ -513,13 +518,19 @@ export function parseCsv(csvContent: string): YnabCsvRow[] {
 
     const rawOutflow = fields[outflowCol]?.trim() ?? '0';
     const rawInflow = fields[inflowCol]?.trim() ?? '0';
+    const account = fields[accountCol]?.trim() ?? '';
+    const payee = payeeCol >= 0 ? (fields[payeeCol]?.trim() ?? '') : '';
+
+    const occurrenceKey = `${account}|${date}|${payee}|${rawOutflow}|${rawInflow}`;
+    const occurrenceIndex = occurrenceCounts.get(occurrenceKey) ?? 0;
+    occurrenceCounts.set(occurrenceKey, occurrenceIndex + 1);
 
     rows.push({
-      account: fields[accountCol]?.trim() ?? '',
+      account,
       flag: flagCol >= 0 ? (fields[flagCol]?.trim() ?? '') : '',
       rawDate,
       date,
-      payee: payeeCol >= 0 ? (fields[payeeCol]?.trim() ?? '') : '',
+      payee,
       categoryGroupCategory: cgCatCol >= 0 ? (fields[cgCatCol]?.trim() ?? '') : '',
       categoryGroup: cgCol >= 0 ? (fields[cgCol]?.trim() ?? '') : '',
       category: catCol >= 0 ? (fields[catCol]?.trim() ?? '') : '',
@@ -529,6 +540,7 @@ export function parseCsv(csvContent: string): YnabCsvRow[] {
       outflow: parseYnabAmount(rawOutflow),
       inflow: parseYnabAmount(rawInflow),
       cleared: fields[clearedCol]?.trim() ?? '',
+      occurrenceIndex,
     });
   }
 
@@ -817,7 +829,7 @@ async function main(): Promise<void> {
       }
     } else {
       const r = group.rows[0];
-      const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow);
+      const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.occurrenceIndex);
 
       if (checkDedup(externalId, existing) === 'skip') {
         skipped++;

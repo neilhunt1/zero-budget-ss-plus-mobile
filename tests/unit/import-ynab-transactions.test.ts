@@ -254,6 +254,7 @@ const makeRow = (overrides: Partial<YnabCsvRow>): YnabCsvRow => ({
   outflow: 10,
   inflow: 0,
   cleared: 'Cleared',
+  occurrenceIndex: 0,
   ...overrides,
 });
 
@@ -620,25 +621,33 @@ describe('parseCsv', () => {
 
 describe('generateExternalId', () => {
   it('produces same id for same inputs', () => {
-    const id1 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00');
-    const id2 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00');
+    const id1 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00', 0);
+    const id2 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00', 0);
     expect(id1).toBe(id2);
   });
 
-  it('produces same id when only memo differs (memo is excluded from hash)', () => {
-    const id1 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00');
-    const id2 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00');
+  it('produces same id when only memo differs (memo excluded from hash)', () => {
+    // Memo changes in YNAB must not change the id — verified by occurrenceIndex=0 both times
+    const id1 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00', 0);
+    const id2 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00', 0);
     expect(id1).toBe(id2);
+  });
+
+  it('produces different id for duplicate transactions via occurrenceIndex', () => {
+    // Two $1.70 Dunkin purchases same day — distinguished by occurrence index
+    const id1 = generateExternalId('Checking', '2026-04-13', "Dunkin'", '1.70', '.00', 0);
+    const id2 = generateExternalId('Checking', '2026-04-13', "Dunkin'", '1.70', '.00', 1);
+    expect(id1).not.toBe(id2);
   });
 
   it('produces different id when amount differs', () => {
-    const id1 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00');
-    const id2 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.29', '.00');
+    const id1 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00', 0);
+    const id2 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.29', '.00', 0);
     expect(id1).not.toBe(id2);
   });
 
   it('starts with "YNAB-"', () => {
-    const id = generateExternalId('Savings', '2026-04-13', 'Test', '.00', '.00');
+    const id = generateExternalId('Savings', '2026-04-13', 'Test', '.00', '.00', 0);
     expect(id).toMatch(/^YNAB-/);
   });
 });
