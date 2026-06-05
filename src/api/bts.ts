@@ -4,6 +4,7 @@ import { appendTransactions, updateTransactionFields } from './transactions';
 
 const BTS_TAB = 'Transactions (BTS)';
 const TRANSACTIONS_EXT_ID_RANGE = 'Transactions!E2:G'; // external_id(E), status(G)
+const CONFIG_TAB = 'Config';
 
 // ─── Pure helpers (exported for unit tests) ───────────────────────────────────
 
@@ -80,9 +81,36 @@ export function normalizeBtsRow(row: BtsRow): Omit<Transaction, '_rowIndex'> {
  * Deduplication is based on external_id (BTS Transaction_id). Idempotent —
  * safe to run multiple times. Also handles pending → cleared transitions.
  */
+/**
+ * Read live_sync_from_date from the Config tab.
+ * Returns null if the Config tab doesn't exist or the key isn't set,
+ * meaning all BTS transactions are eligible for import.
+ */
+async function readLiveSyncFromDate(client: SheetsClient): Promise<string | null> {
+  try {
+    const res = await client.getValues(`${CONFIG_TAB}!A2:B`);
+    for (const row of res.values ?? []) {
+      if (row[0]?.trim() === 'live_sync_from_date') {
+        const val = row[1]?.trim();
+        return val || null;
+      }
+    }
+  } catch {
+    // Config tab may not exist on older sheets — treat as no cutover set
+  }
+  return null;
+}
+
 export async function normalizeBtsTransactions(
   client: SheetsClient
 ): Promise<{ inserted: number; updated: number }> {
+  // Read live_sync_from_date from Config — BTS rows before this date are skipped.
+  // This is the cutover boundary written by the legacy import scripts.
+  const liveSyncFromDate = await readLiveSyncFromDate(client);
+  if (liveSyncFromDate) {
+    console.log(`[BTS] live_sync_from_date: ${liveSyncFromDate} — skipping rows before this date`);
+  }
+
   // Read BTS source tab (header row + data rows).
   // If the tab doesn't exist yet, skip normalization gracefully so the rest
   // of the sync (Transactions tab, categories, etc.) can still proceed.
@@ -143,9 +171,20 @@ export async function normalizeBtsTransactions(
   let updated = 0;
   const toInsert: Omit<Transaction, '_rowIndex'>[] = [];
 
+  let skippedBeforeCutover = 0;
+
   for (const row of btsRows) {
     const transactionId = row[idxId]?.trim();
     if (!transactionId) continue;
+
+    // Skip rows before the live_sync_from_date cutover boundary
+    if (liveSyncFromDate) {
+      const parsedDate = parseBtsDate(row[idxDate] ?? '');
+      if (parsedDate < liveSyncFromDate) {
+        skippedBeforeCutover++;
+        continue;
+      }
+    }
 
     const isPending = row[idxPending]?.trim().toUpperCase() === 'TRUE';
     const btsRow: BtsRow = {
@@ -179,6 +218,6 @@ export async function normalizeBtsTransactions(
   await appendTransactions(client, toInsert);
   const inserted = toInsert.length;
 
-  console.log(`[BTS] done — inserted: ${inserted}, updated: ${updated}, skipped: ${btsRows.length - inserted - updated}`);
+  console.log(`[BTS] done — inserted: ${inserted}, updated: ${updated}, skipped before cutover: ${skippedBeforeCutover}, skipped (already exists): ${btsRows.length - inserted - updated - skippedBeforeCutover}`);
   return { inserted, updated };
 }
