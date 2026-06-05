@@ -3,6 +3,7 @@ import {
   parseYnabDate,
   parseYnabAmount,
   mapClearedStatus,
+  derivedReviewed,
   isSplitRow,
   stripSplitIndicator,
   normalizeForMatch,
@@ -103,6 +104,33 @@ describe('mapClearedStatus', () => {
   it('maps unknown values to "pending"', () => {
     expect(mapClearedStatus('')).toBe('pending');
     expect(mapClearedStatus('unknown')).toBe('pending');
+  });
+});
+
+// ─── derivedReviewed ──────────────────────────────────────────────────────────
+
+describe('derivedReviewed', () => {
+  it('returns TRUE for Cleared', () => {
+    expect(derivedReviewed('Cleared')).toBe('TRUE');
+  });
+
+  it('returns TRUE for Reconciled', () => {
+    expect(derivedReviewed('Reconciled')).toBe('TRUE');
+  });
+
+  it('returns FALSE for Uncleared', () => {
+    expect(derivedReviewed('Uncleared')).toBe('FALSE');
+  });
+
+  it('is case-insensitive', () => {
+    expect(derivedReviewed('cleared')).toBe('TRUE');
+    expect(derivedReviewed('RECONCILED')).toBe('TRUE');
+    expect(derivedReviewed('uncleared')).toBe('FALSE');
+  });
+
+  it('returns FALSE for unknown/empty values', () => {
+    expect(derivedReviewed('')).toBe('FALSE');
+    expect(derivedReviewed('unknown')).toBe('FALSE');
   });
 });
 
@@ -440,9 +468,15 @@ describe('buildRegularTransactionRow', () => {
     expect(row[col('transaction_id')]).toBe(row[col('external_id')]);
   });
 
-  it('sets reviewed to TRUE', () => {
+  it('sets reviewed TRUE for Cleared transaction', () => {
     const row = buildRegularTransactionRow(r, importedAt, categoryIndex);
     expect(row[col('reviewed')]).toBe('TRUE');
+  });
+
+  it('sets reviewed FALSE for Uncleared transaction', () => {
+    const unclearedRow = makeRow({ category: 'Groceries', cleared: 'Uncleared', memo: '' });
+    const row = buildRegularTransactionRow(unclearedRow, importedAt, categoryIndex);
+    expect(row[col('reviewed')]).toBe('FALSE');
   });
 
   it('preserves memo', () => {

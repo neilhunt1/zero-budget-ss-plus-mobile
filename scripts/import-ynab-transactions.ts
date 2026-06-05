@@ -106,6 +106,18 @@ export function mapClearedStatus(cleared: string): 'cleared' | 'pending' {
 }
 
 /**
+ * Derive the reviewed flag from the YNAB Cleared column.
+ * YNAB does not export an approval/reviewed field, so we use Cleared as
+ * the best available proxy: Cleared/Reconciled → reviewed, Uncleared → not.
+ * This means auto-imported-but-unapproved cleared transactions will be marked
+ * reviewed, which is an acceptable trade-off vs flooding triage with all history.
+ */
+export function derivedReviewed(cleared: string): 'TRUE' | 'FALSE' {
+  const v = cleared.trim().toLowerCase();
+  return v === 'cleared' || v === 'reconciled' ? 'TRUE' : 'FALSE';
+}
+
+/**
  * Strip all non-ASCII characters from a string.
  * Used so emoji encoding artifacts in YNAB exports don't break category matching.
  */
@@ -275,7 +287,7 @@ export function buildSplitParentRow(
   row[col('memo')] = '';
   row[col('flag')] = first.flag;
   row[col('transaction_type')] = detectYnabTransactionType(first);
-  row[col('reviewed')] = 'TRUE';
+  row[col('reviewed')] = derivedReviewed(first.cleared);
 
   return { parentRow: row, parentId, splitGroupId };
 }
@@ -318,7 +330,7 @@ export function buildSplitChildRows(
     row[col('memo')] = cleanMemo;
     row[col('flag')] = r.flag;
     row[col('transaction_type')] = detectYnabTransactionType(r);
-    row[col('reviewed')] = 'TRUE';
+    row[col('reviewed')] = derivedReviewed(r.cleared);
 
     return row;
   });
@@ -356,7 +368,7 @@ export function buildRegularTransactionRow(
   row[col('memo')] = r.memo;
   row[col('flag')] = r.flag;
   row[col('transaction_type')] = detectYnabTransactionType(r);
-  row[col('reviewed')] = 'TRUE';
+  row[col('reviewed')] = derivedReviewed(r.cleared);
 
   return row;
 }
