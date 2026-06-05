@@ -10,8 +10,7 @@
  *
  * What is verified:
  *   - Split transactions produce a synthetic parent row + child rows in the sheet
- *   - Re-running the import produces no duplicate rows (tier-1 idempotency)
- *   - A transaction matching an existing one by date+account+amount gets status=probable_duplicate
+ *   - Re-running the import produces no duplicate rows (tier-1 idempotency via external_id)
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { google } from 'googleapis';
@@ -232,40 +231,11 @@ describeIf('import-ynab-transactions @integration', () => {
 
     const existing: ExistingTransactionSummary[] = allRows
       .filter((r) => (r[extIdCol] ?? '').trim() !== '')
-      .map((r) => ({
-        externalId: r[extIdCol] ?? '',
-        date: r[col('date')] ?? '',
-        account: r[col('account')] ?? '',
-        outflow: parseFloat(r[col('outflow')] ?? '0') || 0,
-        inflow: parseFloat(r[col('inflow')] ?? '0') || 0,
-      }));
+      .map((r) => ({ externalId: r[extIdCol] ?? '' }));
 
-    expect(checkDedup(parentId, '', '', 0, 0, existing)).toBe('skip');
+    expect(checkDedup(parentId, existing)).toBe('skip');
     for (const child of childRows) {
-      expect(checkDedup(child[col('external_id')], '', '', 0, 0, existing)).toBe('skip');
+      expect(checkDedup(child[col('external_id')], existing)).toBe('skip');
     }
-  }, TIMEOUT_MS);
-
-  it('transaction matching existing by date+account+amount gets probable_duplicate', async () => {
-    const csvRows = parseCsv(TEST_CSV);
-    const regularGroup = groupRows(csvRows).find((g) => !g.isSplit);
-    expect(regularGroup).toBeDefined();
-
-    const r = regularGroup!.rows[0];
-    const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.memo);
-
-    // Simulate existing transaction with same date+account+amount but different external_id
-    const existing: ExistingTransactionSummary[] = [
-      {
-        externalId: 'BTS-different-id',
-        date: r.date,
-        account: r.account,
-        outflow: r.outflow,
-        inflow: r.inflow,
-      },
-    ];
-
-    const result = checkDedup(externalId, r.date, r.account, r.outflow, r.inflow, existing);
-    expect(result).toBe('probable_duplicate');
   }, TIMEOUT_MS);
 });

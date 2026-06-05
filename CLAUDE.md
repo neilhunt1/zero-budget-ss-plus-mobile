@@ -177,11 +177,15 @@ Never delete a category row that has transaction history. Use `active: false` in
 |---|---|
 | `npm run setup:dev` | Provision dev sheet to latest schema |
 | `npm run setup:prod` | Provision prod sheet to latest schema |
-| `npm run sync-from-ynab:dev` | Sync YNAB Plan CSV to dev sheet |
-| `npm run sync-from-ynab:prod` | Sync YNAB Plan CSV to prod sheet |
+| `npm run import:ynab:plan:dev` | Sync YNAB Plan CSV (budget assignments) to dev sheet |
+| `npm run import:ynab:plan:prod` | Sync YNAB Plan CSV (budget assignments) to prod sheet |
+| `npm run import:ynab:register:dev` | Import YNAB transaction register to dev sheet |
+| `npm run import:ynab:register:prod` | Import YNAB transaction register to prod sheet |
 | `npm run sync-from-prod-to-dev` | Clone prod data to dev for PR testing |
 | `npm test` | Run all unit tests |
 | `npm run test:integration` | Run integration tests against dev sheet |
+
+See **[docs/ynab-sync-runbook.md](docs/ynab-sync-runbook.md)** for the full YNAB sync workflow including BTS/YNAB deduplication strategy.
 
 ---
 

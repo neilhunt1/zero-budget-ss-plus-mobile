@@ -99,6 +99,7 @@ const TABS_IN_ORDER = [
   "Reflect",
   "Budget_Log",
   "Budget_Calcs",
+  "Config",
   "Transactions (BTS)",
   "Balance History (BTS)",
   "YNAB_Plan_Import",
@@ -657,6 +658,84 @@ async function writeBudgetDashboard(
   log("Dashboard: wrote rows 1–4 (ReadyToAssign, LastYnabSync, TotalAssignedThisMonth, TotalAvailable)");
 }
 
+// ─── Step: Write Config tab ───────────────────────────────────────────────────
+//
+// Config tab: key/value pairs written by scripts. Row 1 = headers (key | value).
+// Rows 2+ are key/value entries. Scripts upsert by key; app reads by key.
+// Current keys:
+//   live_sync_from_date  — first date owned by live sync (BTS/Plaid). Set by
+//                          import scripts when --cutover-date is passed.
+
+export const CONFIG_TAB = "Config";
+export const CONFIG_HEADERS = ["key", "value"];
+
+async function writeConfigHeaders(
+  sheets: sheets_v4.Sheets,
+  sheetId: string,
+  sheetMeta: sheets_v4.Schema$Sheet[]
+): Promise<void> {
+  const meta = findSheet(sheetMeta, CONFIG_TAB);
+  if (!meta) return;
+
+  const existing = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `${CONFIG_TAB}!A1:B1`,
+  });
+
+  if (existing.data.values?.[0]?.[0] === "key") {
+    log("Config: headers already present, skipping");
+    return;
+  }
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId,
+    range: `${CONFIG_TAB}!A1`,
+    valueInputOption: "RAW",
+    requestBody: { values: [CONFIG_HEADERS] },
+  });
+
+  log("Config: wrote headers (key | value)");
+}
+
+/**
+ * Upsert a key/value pair in the Config tab.
+ * Exported so import scripts can call it directly without going through setup.
+ */
+export async function upsertConfigValue(
+  sheets: sheets_v4.Sheets,
+  sheetId: string,
+  key: string,
+  value: string
+): Promise<void> {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `${CONFIG_TAB}!A2:B`,
+  });
+  const rows = res.data.values ?? [];
+
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i][0] === key) {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: sheetId,
+        range: `${CONFIG_TAB}!B${i + 2}`,
+        valueInputOption: "RAW",
+        requestBody: { values: [[value]] },
+      });
+      log(`Config: updated ${key} = ${value}`);
+      return;
+    }
+  }
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: sheetId,
+    range: `${CONFIG_TAB}!A2`,
+    valueInputOption: "RAW",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: { values: [[key, value]] },
+  });
+  log(`Config: inserted ${key} = ${value}`);
+}
+
 /**
  * Create or update named ranges to point to Dashboard tab cells.
  * On v6→v7 migration the named ranges exist but point to the old Budget tab,
@@ -1207,6 +1286,9 @@ async function main(): Promise<void> {
 
   // 12. Write Budget dashboard header (rows 1–5) with named ranges
   await writeBudgetDashboard(sheets, sheetId, sheetMeta);
+
+  // 12a. Write Config tab headers
+  await writeConfigHeaders(sheets, sheetId, sheetMeta);
 
   // 13. Write Budget_Calcs formulas (activity + available with rollover, per category per month)
   await writeBudgetCalcs(sheets, sheetId, sheetMeta);

@@ -31,6 +31,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import { google, sheets_v4 } from 'googleapis';
+import { upsertConfigValue } from './setup-sheet';
 
 // ─── CSV parsing ──────────────────────────────────────────────────────────────
 
@@ -152,6 +153,15 @@ export function parseYnabMonth(raw: string): string | null {
 }
 
 /**
+ * Return the date one day after the given YYYY-MM-DD string.
+ */
+export function nextDay(date: string): string {
+  const d = new Date(date + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
  * Build one opening-balance inflow transaction row per depository account.
  * Accounts with a non-positive balance are assumed to be credit accounts and skipped.
  * Returns rows in the same column order as TRANSACTIONS_COLUMNS.
@@ -191,16 +201,31 @@ export function buildOpeningTransactions(
 
 /**
  * Pure merge function: given existing assignment rows and new YNAB rows,
- * returns the merged state. Existing ynab_import rows are replaced; other
- * sources (manual, template) are preserved.
+ * returns the merged state.
+ *
+ * Without cutoverMonth: only ynab_import rows are replaced; manual/template rows
+ * are preserved.
+ *
+ * With cutoverMonth (YYYY-MM): ALL rows for months <= cutoverMonth are wiped and
+ * replaced by YNAB data. Rows after cutoverMonth are preserved regardless of source.
+ * This honours the contract "YNAB is authoritative for everything before cutover".
  *
  * Exported so tests can verify idempotency without Sheets API mocks.
  */
 export function applyYnabAssignments(
   existingRows: string[][],
-  newYnabRows: YnabPlanRow[]
+  newYnabRows: YnabPlanRow[],
+  cutoverMonth: string | null = null,
 ): string[][] {
-  const keepRows = existingRows.filter((row) => (row[3] ?? '') !== 'ynab_import');
+  let keepRows: string[][];
+  if (cutoverMonth) {
+    keepRows = existingRows.filter((row) => {
+      const month = (row[0] ?? '').trim();
+      return month > cutoverMonth; // keep only rows strictly after cutover month
+    });
+  } else {
+    keepRows = existingRows.filter((row) => (row[3] ?? '') !== 'ynab_import');
+  }
   return [
     ...keepRows,
     ...newYnabRows.map((r) => [r.month, r.category, String(r.assigned), 'ynab_import']),
@@ -431,18 +456,19 @@ async function readAccountBalances(
   return result;
 }
 
-/** Wipe source:ynab_import assignments and replace with new YNAB rows. */
+/** Wipe assignments before cutover (all sources) or just ynab_import rows, then replace with new YNAB rows. */
 async function wipeAndRewriteAssignments(
   sheets: sheets_v4.Sheets,
   sheetId: string,
-  newYnabRows: YnabPlanRow[]
+  newYnabRows: YnabPlanRow[],
+  cutoverMonth: string | null,
 ): Promise<void> {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
     range: `Budget!A${BUDGET_ASSIGNMENTS_DATA_ROW}:D`,
   });
   const existing = res.data.values ?? [];
-  const merged = applyYnabAssignments(existing, newYnabRows);
+  const merged = applyYnabAssignments(existing, newYnabRows, cutoverMonth);
 
   await sheets.spreadsheets.values.clear({
     spreadsheetId: sheetId,
@@ -459,7 +485,11 @@ async function wipeAndRewriteAssignments(
   }
 
   const keptCount = merged.length - newYnabRows.length;
-  log(`Assignments: kept ${keptCount} non-ynab_import row(s), wrote ${newYnabRows.length} ynab_import row(s)`);
+  if (cutoverMonth) {
+    log(`Assignments: wiped all rows ≤ ${cutoverMonth}, kept ${keptCount} post-cutover row(s), wrote ${newYnabRows.length} ynab_import row(s)`);
+  } else {
+    log(`Assignments: kept ${keptCount} non-ynab_import row(s), wrote ${newYnabRows.length} ynab_import row(s)`);
+  }
 }
 
 /**
@@ -554,7 +584,7 @@ function bail(msg: string): never {
   process.exit(1);
 }
 
-function parseArgs(): { planFilePath: string | null } {
+function parseArgs(): { planFilePath: string | null; cutoverDate: string | null } {
   const args = process.argv.slice(2);
   const get = (flag: string) => {
     const idx = args.findIndex((a) => a === flag || a.startsWith(`${flag}=`));
@@ -571,7 +601,12 @@ function parseArgs(): { planFilePath: string | null } {
     bail(`File not found: ${resolved}`);
   }
 
-  return { planFilePath: fs.existsSync(resolved) ? resolved : null };
+  const cutoverDate = get('--cutover-date');
+  if (cutoverDate !== null && !/^\d{4}-\d{2}-\d{2}$/.test(cutoverDate)) {
+    bail(`--cutover-date must be YYYY-MM-DD format, got: "${cutoverDate}"`);
+  }
+
+  return { planFilePath: fs.existsSync(resolved) ? resolved : null, cutoverDate };
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -579,8 +614,14 @@ function parseArgs(): { planFilePath: string | null } {
 async function main(): Promise<void> {
   console.log('\n── Zero Budget: Sync from YNAB ─────────────────────────────\n');
 
-  const { planFilePath } = parseArgs();
+  const { planFilePath, cutoverDate } = parseArgs();
   const { sheetId, authConfig } = loadEnv();
+
+  // cutoverMonth is YYYY-MM derived from --cutover-date (day portion is ignored for assignments)
+  const cutoverMonth = cutoverDate ? cutoverDate.slice(0, 7) : null;
+  if (cutoverMonth) {
+    log(`Cutover mode: assignments for months ≤ ${cutoverMonth} will be fully replaced`);
+  }
 
   const auth = new google.auth.GoogleAuth({
     ...(authConfig.kind === 'keyFile'
@@ -614,14 +655,20 @@ async function main(): Promise<void> {
   const seedRows = buildOpeningTransactions(accountBalances, now);
   log(`Seed transactions: ${seedRows.length} depository account(s) (${accountBalances.length - seedRows.length} credit account(s) skipped)`);
 
-  // Step 4: wipe ynab_import assignments and re-import all months
-  await wipeAndRewriteAssignments(sheets, sheetId, ynabRows);
+  // Step 4: wipe assignments and re-import all months
+  await wipeAndRewriteAssignments(sheets, sheetId, ynabRows, cutoverMonth);
 
   // Step 5: wipe seed transactions and re-create opening balances
   await wipeAndRewriteSeedTransactions(sheets, sheetId, sheetMeta, seedRows);
 
   // Step 6: stamp sync timestamp
   await writeLastYnabSync(sheets, sheetId, now.toISOString());
+
+  // Step 7: write live_sync_from_date to Config tab if cutover date was specified
+  if (cutoverDate) {
+    const liveSyncFromDate = nextDay(cutoverDate);
+    await upsertConfigValue(sheets, sheetId, 'live_sync_from_date', liveSyncFromDate);
+  }
 
   console.log('\n── Sync complete ────────────────────────────────────────────\n');
 }

@@ -192,34 +192,20 @@ describe('accountsMatch', () => {
 
 describe('checkDedup', () => {
   const existing: ExistingTransactionSummary[] = [
-    { externalId: 'YNAB-abc123', date: '2026-04-13', account: 'Savings', outflow: 28, inflow: 0 },
-    { externalId: 'BTS-xyz789', date: '2026-04-15', account: 'Checking (...1234)', outflow: 50, inflow: 0 },
+    { externalId: 'YNAB-abc123' },
+    { externalId: 'BTS-xyz789' },
   ];
 
-  it('tier 1: returns "skip" on exact external_id match', () => {
-    expect(checkDedup('YNAB-abc123', '2026-04-13', 'Savings', 28, 0, existing)).toBe('skip');
+  it('returns "skip" on exact external_id match', () => {
+    expect(checkDedup('YNAB-abc123', existing)).toBe('skip');
   });
 
-  it('tier 2: returns "probable_duplicate" on same date + account + amount', () => {
-    expect(checkDedup('YNAB-newid', '2026-04-15', 'My Account ...1234', 50, 0, existing)).toBe('probable_duplicate');
-  });
-
-  it('tier 3: returns "insert" when no match found', () => {
-    expect(checkDedup('YNAB-brand-new', '2026-05-01', 'Savings', 100, 0, existing)).toBe('insert');
-  });
-
-  it('tier 1 takes priority over tier 2', () => {
-    // Even if date+account+amount also match, tier 1 wins
-    expect(checkDedup('YNAB-abc123', '2026-04-13', 'Savings', 28, 0, existing)).toBe('skip');
-  });
-
-  it('amount tolerance is within 0.005', () => {
-    expect(checkDedup('YNAB-newid', '2026-04-13', 'Savings', 28.001, 0, existing)).toBe('probable_duplicate');
-    expect(checkDedup('YNAB-newid', '2026-04-13', 'Savings', 28.01, 0, existing)).toBe('insert');
+  it('returns "insert" when no external_id match found', () => {
+    expect(checkDedup('YNAB-brand-new', existing)).toBe('insert');
   });
 
   it('returns "insert" for empty existing list', () => {
-    expect(checkDedup('YNAB-anything', '2026-04-13', 'Savings', 28, 0, [])).toBe('insert');
+    expect(checkDedup('YNAB-anything', [])).toBe('insert');
   });
 });
 
