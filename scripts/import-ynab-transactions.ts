@@ -835,7 +835,7 @@ async function main(): Promise<void> {
       rowsToInsert.push(parentRow);
 
       for (const childRow of childRows) {
-        const childExtId = childRow[TRANSACTIONS_COLUMNS.indexOf('external_id')];
+        const childExtId = childRow[TRANSACTIONS_COLUMNS.indexOf('external_id')] as string;
         if (checkDedup(childExtId, existing) === 'skip') continue;
         rowsToInsert.push(childRow);
       }
