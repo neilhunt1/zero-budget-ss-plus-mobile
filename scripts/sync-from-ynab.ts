@@ -169,10 +169,10 @@ export function nextDay(date: string): string {
 export function buildOpeningTransactions(
   accounts: AccountBalance[],
   now: Date = new Date()
-): string[][] {
+): (string | number)[][] {
   const importedAt = now.toISOString();
   const date = now.toISOString().slice(0, 10);
-  const rows: string[][] = [];
+  const rows: (string | number)[][] = [];
 
   for (const { account, balance } of accounts) {
     if (balance <= 0) continue;
@@ -180,7 +180,7 @@ export function buildOpeningTransactions(
     const safeId = account.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
     const txId = `seed_${safeId}`;
 
-    const row = new Array<string>(TRANSACTIONS_COLUMNS.length).fill('');
+    const row = new Array<string | number>(TRANSACTIONS_COLUMNS.length).fill('');
     const col = (name: string) => TRANSACTIONS_COLUMNS.indexOf(name);
     row[col('transaction_id')] = txId;
     row[col('source')] = 'seed';
@@ -188,7 +188,7 @@ export function buildOpeningTransactions(
     row[col('status')] = 'cleared';
     row[col('date')] = date;
     row[col('payee')] = 'Opening Balance';
-    row[col('inflow')] = String(balance);
+    row[col('inflow')] = balance;
     row[col('account')] = account;
     row[col('memo')] = 'Seeded from Balance History (BTS)';
     row[col('transaction_type')] = 'credit';
@@ -216,7 +216,7 @@ export function applyYnabAssignments(
   existingRows: string[][],
   newYnabRows: YnabPlanRow[],
   cutoverMonth: string | null = null,
-): string[][] {
+): (string | number)[][] {
   let keepRows: string[][];
   if (cutoverMonth) {
     keepRows = existingRows.filter((row) => {
@@ -228,7 +228,7 @@ export function applyYnabAssignments(
   }
   return [
     ...keepRows,
-    ...newYnabRows.map((r) => [r.month, r.category, String(r.assigned), 'ynab_import']),
+    ...newYnabRows.map((r) => [r.month, r.category, r.assigned, 'ynab_import']),
   ];
 }
 
@@ -500,7 +500,7 @@ async function wipeAndRewriteSeedTransactions(
   sheets: sheets_v4.Sheets,
   sheetId: string,
   sheetMeta: sheets_v4.Schema$Sheet[],
-  newSeedRows: string[][]
+  newSeedRows: (string | number)[][]
 ): Promise<void> {
   const txSheet = sheetMeta.find((s) => s.properties?.title === 'Transactions');
   if (!txSheet) {

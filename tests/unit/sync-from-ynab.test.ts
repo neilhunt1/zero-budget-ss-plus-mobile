@@ -165,7 +165,7 @@ describe('buildOpeningTransactions', () => {
     const accounts: AccountBalance[] = [{ account: 'Checking', balance: 4567.89 }];
     const [row] = buildOpeningTransactions(accounts, fixedNow);
     // inflow is at index 16
-    expect(row[16]).toBe('4567.89');
+    expect(row[16]).toBe(4567.89);
   });
 
   it('generates deterministic transaction_id from account name', () => {
@@ -235,7 +235,7 @@ describe('applyYnabAssignments', () => {
       (r) => r[1] === 'Groceries 🛒' && r[0] === '2026-04'
     );
     expect(groceriesRows).toHaveLength(1);
-    expect(groceriesRows[0][2]).toBe('1000');
+    expect(groceriesRows[0][2]).toBe(1000);
   });
 
   describe('cutover mode', () => {

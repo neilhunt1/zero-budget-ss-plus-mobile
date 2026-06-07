@@ -257,12 +257,12 @@ export function groupRows(
 
 /**
  * Build the synthetic parent transaction row for a split group.
- * Returns the parent row (string[]) plus the shared parentId/splitGroupId.
+ * Returns the parent row plus the shared parentId/splitGroupId.
  */
 export function buildSplitParentRow(
   group: YnabCsvRow[],
   importedAt: string,
-): { parentRow: string[]; parentId: string; splitGroupId: string } {
+): { parentRow: (string | number)[]; parentId: string; splitGroupId: string } {
   const first = group[0];
 
   const totalOutflow = group.reduce((s, r) => s + r.outflow, 0);
@@ -276,7 +276,7 @@ export function buildSplitParentRow(
   const parentId = `YNAB-SPLIT-${first.date}-${accountSafe}-${groupHash}`;
   const splitGroupId = parentId;
 
-  const row = new Array<string>(TRANSACTIONS_COLUMNS.length).fill('');
+  const row = new Array<string | number>(TRANSACTIONS_COLUMNS.length).fill('');
   const col = (name: string) => TRANSACTIONS_COLUMNS.indexOf(name);
 
   row[col('transaction_id')] = parentId;
@@ -291,8 +291,8 @@ export function buildSplitParentRow(
   row[col('category')] = '';
   row[col('category_group')] = '';
   row[col('category_subgroup')] = '';
-  row[col('outflow')] = String(totalOutflow);
-  row[col('inflow')] = String(totalInflow);
+  row[col('outflow')] = totalOutflow;
+  row[col('inflow')] = totalInflow;
   row[col('account')] = first.account;
   row[col('memo')] = '';
   row[col('flag')] = first.flag;
@@ -313,13 +313,13 @@ export function buildSplitChildRows(
   splitGroupId: string,
   importedAt: string,
   categoryIndex: Map<string, string>,
-): string[][] {
+): (string | number)[][] {
   return group.map((r) => {
     const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.occurrenceIndex);
     const canonicalCategory = resolveCategory(r.category, categoryIndex);
     const cleanMemo = stripSplitIndicator(r.memo);
 
-    const row = new Array<string>(TRANSACTIONS_COLUMNS.length).fill('');
+    const row = new Array<string | number>(TRANSACTIONS_COLUMNS.length).fill('');
     const col = (name: string) => TRANSACTIONS_COLUMNS.indexOf(name);
 
     row[col('transaction_id')] = externalId;
@@ -334,8 +334,8 @@ export function buildSplitChildRows(
     row[col('category')] = canonicalCategory;
     row[col('category_group')] = '';
     row[col('category_subgroup')] = '';
-    row[col('outflow')] = String(r.outflow);
-    row[col('inflow')] = String(r.inflow);
+    row[col('outflow')] = r.outflow;
+    row[col('inflow')] = r.inflow;
     row[col('account')] = r.account;
     row[col('memo')] = cleanMemo;
     row[col('flag')] = r.flag;
@@ -353,11 +353,11 @@ export function buildRegularTransactionRow(
   r: YnabCsvRow,
   importedAt: string,
   categoryIndex: Map<string, string>,
-): string[] {
+): (string | number)[] {
   const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.occurrenceIndex);
   const canonicalCategory = resolveCategory(r.category, categoryIndex);
 
-  const row = new Array<string>(TRANSACTIONS_COLUMNS.length).fill('');
+  const row = new Array<string | number>(TRANSACTIONS_COLUMNS.length).fill('');
   const col = (name: string) => TRANSACTIONS_COLUMNS.indexOf(name);
 
   row[col('transaction_id')] = externalId;
@@ -816,7 +816,7 @@ async function main(): Promise<void> {
   // Process groups
   const groups = groupRows(cutoverRows);
 
-  const rowsToInsert: string[][] = [];
+  const rowsToInsert: (string | number)[][] = [];
   let skipped = 0;
   let splitGroupsFound = 0;
 
