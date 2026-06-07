@@ -372,8 +372,8 @@ export function buildRegularTransactionRow(
   row[col('category')] = canonicalCategory;
   row[col('category_group')] = '';
   row[col('category_subgroup')] = '';
-  row[col('outflow')] = String(r.outflow);
-  row[col('inflow')] = String(r.inflow);
+  row[col('outflow')] = r.outflow;
+  row[col('inflow')] = r.inflow;
   row[col('account')] = r.account;
   row[col('memo')] = r.memo;
   row[col('flag')] = r.flag;
