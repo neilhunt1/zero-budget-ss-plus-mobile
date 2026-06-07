@@ -580,6 +580,7 @@ async function loadCategoryIndex(
 interface CliArgs {
   filePath: string;
   cutoverDate: string;  // YYYY-MM-DD
+  wipe: boolean;        // if true, also removes ynab_import rows before re-inserting
 }
 
 function parseArgs(): CliArgs {
@@ -593,6 +594,7 @@ function parseArgs(): CliArgs {
 
   const rawFile = get('--file') ?? 'data/ynab/register.csv';
   const cutoverDate = get('--cutover-date') ?? new Date().toISOString().slice(0, 10);
+  const wipe = args.includes('--wipe');
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(cutoverDate)) {
     bail(`--cutover-date must be in YYYY-MM-DD format, got: "${cutoverDate}"`);
@@ -606,7 +608,7 @@ function parseArgs(): CliArgs {
     );
   }
 
-  return { filePath: resolved, cutoverDate };
+  return { filePath: resolved, cutoverDate, wipe };
 }
 
 function loadEnv(): { sheetId: string; authConfig: AuthConfig } {
@@ -686,18 +688,22 @@ async function readExistingTransactions(
 }
 
 /**
- * Remove non-ynab_import rows with date <= cutoverDate using a read-filter-rewrite
+ * Remove unwanted rows with date <= cutoverDate using a read-filter-rewrite
  * strategy: read all rows, drop the unwanted ones in memory, clear the sheet,
- * write back the survivors. This is always 3 API calls regardless of row count —
- * far more reliable than issuing one deleteDimension request per row.
+ * write back the survivors. This is always 3 API calls regardless of row count.
  *
- * ynab_import rows are left in place so re-runs are fast (external_id dedup
- * in the insert phase skips rows already present).
+ * wipe=false (default): removes only non-ynab_import rows (BTS/manual/seed).
+ *   ynab_import rows stay so re-runs are fast — external_id dedup skips them.
+ *
+ * wipe=true: removes ALL rows on or before cutoverDate including ynab_import.
+ *   Use when the external_id format has changed and existing rows will never
+ *   match incoming hashes (e.g. after changing the hash inputs).
  */
 async function removeNonYnabTransactionsBeforeCutover(
   sheets: sheets_v4.Sheets,
   sheetId: string,
   cutoverDate: string,
+  wipe = false,
 ): Promise<void> {
   const dateColIndex = TRANSACTIONS_COLUMNS.indexOf('date');
   const sourceColIndex = TRANSACTIONS_COLUMNS.indexOf('source');
@@ -713,18 +719,19 @@ async function removeNonYnabTransactionsBeforeCutover(
     return;
   }
 
-  // 2. Filter in memory — keep rows that are NOT (pre-cutover AND non-ynab_import)
+  // 2. Filter in memory
   const keptRows = allRows.filter((row) => {
     const date = (row[dateColIndex] ?? '').trim();
     const source = (row[sourceColIndex] ?? '').trim();
     const isPreCutover = date && date <= cutoverDate;
-    const isNonYnab = source !== 'ynab_import';
-    return !(isPreCutover && isNonYnab);
+    if (!isPreCutover) return true;                          // always keep post-cutover rows
+    if (wipe) return false;                                  // --wipe: drop everything pre-cutover
+    return source === 'ynab_import';                        // default: keep only ynab_import pre-cutover
   });
 
   const removedCount = allRows.length - keptRows.length;
   if (removedCount === 0) {
-    log(`Transactions: no non-ynab_import rows on or before ${cutoverDate} — nothing to remove`);
+    log(`Transactions: nothing to remove on or before ${cutoverDate}`);
     return;
   }
 
@@ -743,7 +750,8 @@ async function removeNonYnabTransactionsBeforeCutover(
     });
   }
 
-  log(`Transactions: removed ${removedCount} non-ynab_import row(s) on or before ${cutoverDate}, kept ${keptRows.length}`);
+  const label = wipe ? 'all' : 'non-ynab_import';
+  log(`Transactions: removed ${removedCount} ${label} row(s) on or before ${cutoverDate}, kept ${keptRows.length}`);
 }
 
 // ─── Logging & error helpers ──────────────────────────────────────────────────
@@ -762,7 +770,7 @@ function bail(msg: string): never {
 async function main(): Promise<void> {
   console.log('\n── Zero Budget: Import YNAB Transactions ───────────────────\n');
 
-  const { filePath, cutoverDate } = parseArgs();
+  const { filePath, cutoverDate, wipe } = parseArgs();
   const { sheetId, authConfig } = loadEnv();
 
   const auth = new google.auth.GoogleAuth({
@@ -788,8 +796,12 @@ async function main(): Promise<void> {
   // Remove non-ynab_import rows on or before cutover date (BTS, manual, seed).
   // Existing ynab_import rows are left in place — the external_id dedup below
   // will skip them, making re-runs fast (only the delta gets inserted).
-  log(`Cutover mode: removing non-YNAB rows on or before ${cutoverDate}`);
-  await removeNonYnabTransactionsBeforeCutover(sheets, sheetId, cutoverDate);
+  if (wipe) {
+    log(`Cutover mode (--wipe): removing ALL rows on or before ${cutoverDate} for clean re-import`);
+  } else {
+    log(`Cutover mode: removing non-YNAB rows on or before ${cutoverDate}`);
+  }
+  await removeNonYnabTransactionsBeforeCutover(sheets, sheetId, cutoverDate, wipe);
 
   // Load categories from the sheet
   const categoryIndex = await loadCategoryIndex(sheets, sheetId);
