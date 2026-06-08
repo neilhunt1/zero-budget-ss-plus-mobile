@@ -71,17 +71,22 @@ export function aggregateSpending(
   categoryGroupMap?: Map<string, string>,    // category → category_group fallback
   categorySubgroupMap?: Map<string, string>, // category → category_subgroup fallback
 ): GroupSpend[] {
-  const outflows = transactions.filter(
+  // Include all non-transfer transactions with a net outflow contribution.
+  // Outflow-only rows are spending; inflow-only rows (refunds, credits, reimbursements)
+  // on spending categories reduce the total. Pure income deposits (inflow > 0, outflow = 0)
+  // are included in the accumulation but their negative net will be filtered out below,
+  // so income groups never appear in the spending view.
+  const relevant = transactions.filter(
     (t) =>
       t.transaction_type !== 'transfer' &&
-      t.outflow > 0 &&
+      (t.outflow > 0 || t.inflow > 0) &&
       (selectedCategories === null || selectedCategories.has(t.category)),
   );
 
-  // group → subgroup → category → total
+  // group → subgroup → category → net (outflow - inflow)
   const byGroup = new Map<string, Map<string, Map<string, number>>>();
 
-  for (const t of outflows) {
+  for (const t of relevant) {
     const group = t.category_group || categoryGroupMap?.get(t.category) || 'Uncategorized';
     const subgroup = t.category_subgroup || categorySubgroupMap?.get(t.category) || '';
     const cat = t.category || 'Uncategorized';
@@ -90,18 +95,21 @@ export function aggregateSpending(
     const subMap = byGroup.get(group)!;
     if (!subMap.has(subgroup)) subMap.set(subgroup, new Map());
     const catMap = subMap.get(subgroup)!;
-    catMap.set(cat, (catMap.get(cat) ?? 0) + t.outflow);
+    catMap.set(cat, (catMap.get(cat) ?? 0) + t.outflow - t.inflow);
   }
 
   return [...byGroup.entries()]
     .map(([group, subMap]) => {
       const subgroups: SubgroupSpend[] = [...subMap.entries()]
         .map(([subgroup, catMap]) => {
+          // Only include categories with a positive net spend (filters out pure income categories)
           const categories: CategorySpend[] = [...catMap.entries()]
+            .filter(([, total]) => total > 0)
             .map(([category, total]) => ({ category, total }))
             .sort((a, b) => b.total - a.total);
           return { subgroup, total: categories.reduce((s, c) => s + c.total, 0), categories };
         })
+        .filter((sg) => sg.total > 0)
         .sort((a, b) => b.total - a.total);
 
       // Flat category list across all subgroups, sorted by total
@@ -111,5 +119,6 @@ export function aggregateSpending(
 
       return { group, total: categories.reduce((s, c) => s + c.total, 0), subgroups, categories };
     })
+    .filter((g) => g.total > 0)
     .sort((a, b) => b.total - a.total);
 }

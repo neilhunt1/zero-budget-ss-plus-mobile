@@ -69,6 +69,27 @@ describe('aggregateSpending', () => {
     expect(result[0].group).toBe('Food');
   });
 
+  it('nets inflow (refund) against outflow; hides category when refund exceeds spend', () => {
+    // 2000 + 3000 outflow, 5600 refund → net -600 → category hidden (filtered)
+    const txns = [
+      tx({ category_group: 'Housing', category: 'Escrow', outflow: 2000, inflow: 0 }),
+      tx({ category_group: 'Housing', category: 'Escrow', outflow: 3000, inflow: 0 }),
+      tx({ category_group: 'Housing', category: 'Escrow', outflow: 0, inflow: 5600 }),
+    ];
+    const result = aggregateSpending(txns, null);
+    expect(result).toHaveLength(0); // net negative → filtered out
+  });
+
+  it('shows category with positive net after inflow netting', () => {
+    const txns = [
+      tx({ category_group: 'Housing', category: 'Escrow', outflow: 6000, inflow: 0 }),
+      tx({ category_group: 'Housing', category: 'Escrow', outflow: 0, inflow: 1000 }), // partial refund
+    ];
+    const result = aggregateSpending(txns, null);
+    expect(result).toHaveLength(1);
+    expect(result[0].total).toBeCloseTo(5000); // 6000 - 1000
+  });
+
   it('filters by selectedCategories when provided', () => {
     const txns = [
       tx({ category_group: 'Food', category: 'Groceries', outflow: 100 }),

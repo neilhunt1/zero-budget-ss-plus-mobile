@@ -13,7 +13,7 @@ interface Props {
 }
 
 function fmt(n: number): string {
-  return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function pct(n: number, total: number): string {
