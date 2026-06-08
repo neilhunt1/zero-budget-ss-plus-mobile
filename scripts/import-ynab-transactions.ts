@@ -1,15 +1,15 @@
 /**
  * import-ynab-transactions.ts
  *
- * One-shot script to import YNAB transaction history into the Transactions tab.
- * Purely additive — never deletes existing transactions. Safe to run multiple times.
+ * Full-wipe import of YNAB transaction history into the Transactions tab.
  *
  * What it does:
  *   1. Reads a local YNAB transaction CSV export (--file flag)
  *   2. Filters to transactions on or before --cutover-date
- *   3. Detects split groups and synthesises parent rows
- *   4. Deduplicates against existing sheet transactions (3 tiers)
- *   5. Appends new rows and marks probable duplicates
+ *   3. Clears ALL rows on or before cutover date from the Transactions tab
+ *   4. Detects split groups and synthesises parent rows
+ *   5. Writes all YNAB rows to the sheet
+ *   6. Writes live_sync_from_date to Config (tells BTS sync where to start)
  *
  * Usage:
  *   npm run import:ynab:register:dev
@@ -20,9 +20,8 @@
  *   --file          data/ynab/register.csv  (relative to project root)
  *   --cutover-date  today (YYYY-MM-DD)
  *
- * Idempotency contract:
- *   - Re-running with the same CSV produces no new rows (tier-1 exact dedup)
- *   - Never deletes or overwrites existing transactions of any source
+ * Idempotency: always a full wipe-and-rewrite of the cutover window, so
+ * re-running with the same CSV produces the same result with no duplicates.
  */
 
 import * as path from 'path';
@@ -49,15 +48,7 @@ export interface YnabCsvRow {
   outflow: number;
   inflow: number;
   cleared: string;
-  /** 0-based count of how many prior rows share the same account+date+payee+outflow+inflow. */
-  occurrenceIndex: number;
 }
-
-export interface ExistingTransactionSummary {
-  externalId: string;
-}
-
-export type DedupAction = 'skip' | 'insert';
 
 type AuthConfig =
   | { kind: 'keyFile'; keyPath: string }
@@ -150,29 +141,6 @@ export function shortHash(...parts: string[]): string {
 }
 
 /**
- * Generate a stable external_id for a YNAB CSV row.
- *
- * Deliberately excludes memo: memos are frequently edited in YNAB after a
- * transaction is imported, and including them in the hash would produce a new
- * id on re-import, causing duplicate rows in BTSZB.
- *
- * occurrenceIndex disambiguates truly identical transactions on the same day
- * (same account, payee, and amounts — e.g. two $1.70 Dunkin' purchases).
- * YNAB exports rows in a stable order, so the first occurrence always gets
- * index 0, the second index 1, etc., making the id stable across re-imports.
- */
-export function generateExternalId(
-  account: string,
-  date: string,
-  payee: string,
-  rawOutflow: string,
-  rawInflow: string,
-  occurrenceIndex: number,
-): string {
-  return `YNAB-${shortHash(account, date, payee, rawOutflow, rawInflow, String(occurrenceIndex))}`;
-}
-
-/**
  * Extract trailing 4-digit sequence from an account name.
  * "Chase Checking ...1234" → "1234", "Savings" → null.
  * Used for fuzzy account matching between YNAB and BTS naming conventions.
@@ -191,27 +159,6 @@ export function accountsMatch(a: string, b: string): boolean {
   const a4 = extractLast4(a);
   const b4 = extractLast4(b);
   return a4 !== null && b4 !== null && a4 === b4;
-}
-
-/**
- * Two-tier deduplication logic for a single incoming transaction.
- *
- * Tier 1 — exact external_id match → 'skip'
- * Tier 2 — no match → 'insert'
- *
- * Probable-duplicate detection (date+account+amount fuzzy match) has been removed.
- * When --cutover-date is used, all pre-cutover rows are deleted before import, so
- * there is no BTS/YNAB overlap to resolve. Re-running with the same CSV is safe
- * via tier-1 exact dedup on external_id.
- */
-export function checkDedup(
-  newExternalId: string,
-  existing: ExistingTransactionSummary[],
-): DedupAction {
-  for (const ex of existing) {
-    if (ex.externalId === newExternalId) return 'skip';
-  }
-  return 'insert';
 }
 
 /**
@@ -268,11 +215,8 @@ export function buildSplitParentRow(
   const totalOutflow = group.reduce((s, r) => s + r.outflow, 0);
   const totalInflow = group.reduce((s, r) => s + r.inflow, 0);
 
-  const childExternalIds = group.map((r) =>
-    generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.occurrenceIndex),
-  );
-  const groupHash = shortHash(...childExternalIds);
   const accountSafe = first.account.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  const groupHash = shortHash(first.date, first.account, first.payee, String(totalOutflow), String(totalInflow));
   const parentId = `YNAB-SPLIT-${first.date}-${accountSafe}-${groupHash}`;
   const splitGroupId = parentId;
 
@@ -314,8 +258,8 @@ export function buildSplitChildRows(
   importedAt: string,
   categoryIndex: Map<string, string>,
 ): (string | number)[][] {
-  return group.map((r) => {
-    const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.occurrenceIndex);
+  return group.map((r, index) => {
+    const externalId = `${parentId}-child-${index}`;
     const canonicalCategory = resolveCategory(r.category, categoryIndex);
     const cleanMemo = stripSplitIndicator(r.memo);
 
@@ -353,18 +297,19 @@ export function buildRegularTransactionRow(
   r: YnabCsvRow,
   importedAt: string,
   categoryIndex: Map<string, string>,
+  rowIndex: number,
 ): (string | number)[] {
-  const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.occurrenceIndex);
+  const txId = `YNAB-${shortHash(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, String(rowIndex))}`;
   const canonicalCategory = resolveCategory(r.category, categoryIndex);
 
   const row = new Array<string | number>(TRANSACTIONS_COLUMNS.length).fill('');
   const col = (name: string) => TRANSACTIONS_COLUMNS.indexOf(name);
 
-  row[col('transaction_id')] = externalId;
+  row[col('transaction_id')] = txId;
   row[col('parent_id')] = '';
   row[col('split_group_id')] = '';
   row[col('source')] = 'ynab_import';
-  row[col('external_id')] = externalId;
+  row[col('external_id')] = txId;
   row[col('imported_at')] = importedAt;
   row[col('status')] = mapClearedStatus(r.cleared);
   row[col('date')] = r.date;
@@ -502,9 +447,6 @@ export function parseCsv(csvContent: string): YnabCsvRow[] {
   }
 
   const rows: YnabCsvRow[] = [];
-  // Tracks how many times each (account|date|payee|outflow|inflow) key has
-  // appeared so far, to assign a stable occurrence index to each row.
-  const occurrenceCounts = new Map<string, number>();
   let skipped = 0;
 
   for (let i = 1; i < lines.length; i++) {
@@ -521,10 +463,6 @@ export function parseCsv(csvContent: string): YnabCsvRow[] {
     const account = fields[accountCol]?.trim() ?? '';
     const payee = payeeCol >= 0 ? (fields[payeeCol]?.trim() ?? '') : '';
 
-    const occurrenceKey = `${account}|${date}|${payee}|${rawOutflow}|${rawInflow}`;
-    const occurrenceIndex = occurrenceCounts.get(occurrenceKey) ?? 0;
-    occurrenceCounts.set(occurrenceKey, occurrenceIndex + 1);
-
     rows.push({
       account,
       flag: flagCol >= 0 ? (fields[flagCol]?.trim() ?? '') : '',
@@ -540,7 +478,6 @@ export function parseCsv(csvContent: string): YnabCsvRow[] {
       outflow: parseYnabAmount(rawOutflow),
       inflow: parseYnabAmount(rawInflow),
       cleared: fields[clearedCol]?.trim() ?? '',
-      occurrenceIndex,
     });
   }
 
@@ -580,7 +517,6 @@ async function loadCategoryIndex(
 interface CliArgs {
   filePath: string;
   cutoverDate: string;  // YYYY-MM-DD
-  wipe: boolean;        // if true, also removes ynab_import rows before re-inserting
 }
 
 function parseArgs(): CliArgs {
@@ -594,7 +530,6 @@ function parseArgs(): CliArgs {
 
   const rawFile = get('--file') ?? 'data/ynab/register.csv';
   const cutoverDate = get('--cutover-date') ?? new Date().toISOString().slice(0, 10);
-  const wipe = args.includes('--wipe');
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(cutoverDate)) {
     bail(`--cutover-date must be in YYYY-MM-DD format, got: "${cutoverDate}"`);
@@ -608,7 +543,7 @@ function parseArgs(): CliArgs {
     );
   }
 
-  return { filePath: resolved, cutoverDate, wipe };
+  return { filePath: resolved, cutoverDate };
 }
 
 function loadEnv(): { sheetId: string; authConfig: AuthConfig } {
@@ -666,47 +601,18 @@ function loadEnv(): { sheetId: string; authConfig: AuthConfig } {
 // ─── Sheet operations ─────────────────────────────────────────────────────────
 
 /**
- * Read external_ids of all existing transactions for dedup purposes.
- * Only reads the external_id column.
- */
-async function readExistingTransactions(
-  sheets: sheets_v4.Sheets,
-  sheetId: string,
-): Promise<ExistingTransactionSummary[]> {
-  const extIdCol = TRANSACTIONS_COLUMNS.indexOf('external_id');
-  const extIdColLetter = String.fromCharCode(65 + extIdCol);
-
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: `Transactions!${extIdColLetter}2:${extIdColLetter}`,
-  });
-  const rows = res.data.values ?? [];
-
-  return rows
-    .filter((row) => (row[0] ?? '').trim() !== '')
-    .map((row) => ({ externalId: row[0] }));
-}
-
-/**
- * Remove unwanted rows with date <= cutoverDate using a read-filter-rewrite
- * strategy: read all rows, drop the unwanted ones in memory, clear the sheet,
- * write back the survivors. This is always 3 API calls regardless of row count.
+ * Wipe all rows with date <= cutoverDate using a read-filter-rewrite strategy:
+ * read all rows, drop pre-cutover rows in memory, clear the sheet, write back
+ * survivors. Always 3 API calls regardless of row count.
  *
- * wipe=false (default): removes only non-ynab_import rows (BTS/manual/seed).
- *   ynab_import rows stay so re-runs are fast — external_id dedup skips them.
- *
- * wipe=true: removes ALL rows on or before cutoverDate including ynab_import.
- *   Use when the external_id format has changed and existing rows will never
- *   match incoming hashes (e.g. after changing the hash inputs).
+ * Rows after cutoverDate are always kept (BTS live-sync data).
  */
-async function removeNonYnabTransactionsBeforeCutover(
+async function wipeCutoverWindow(
   sheets: sheets_v4.Sheets,
   sheetId: string,
   cutoverDate: string,
-  wipe = false,
 ): Promise<void> {
   const dateColIndex = TRANSACTIONS_COLUMNS.indexOf('date');
-  const sourceColIndex = TRANSACTIONS_COLUMNS.indexOf('source');
 
   // 1. Read all data rows
   const res = await sheets.spreadsheets.values.get({
@@ -715,27 +621,23 @@ async function removeNonYnabTransactionsBeforeCutover(
   });
   const allRows = res.data.values ?? [];
   if (allRows.length === 0) {
-    log('Transactions: sheet is empty, nothing to clean');
+    log('Transactions: sheet is empty, nothing to wipe');
     return;
   }
 
-  // 2. Filter in memory
+  // 2. Keep only rows strictly after cutoverDate
   const keptRows = allRows.filter((row) => {
     const date = (row[dateColIndex] ?? '').trim();
-    const source = (row[sourceColIndex] ?? '').trim();
-    const isPreCutover = date && date <= cutoverDate;
-    if (!isPreCutover) return true;                          // always keep post-cutover rows
-    if (wipe) return false;                                  // --wipe: drop everything pre-cutover
-    return source === 'ynab_import';                        // default: keep only ynab_import pre-cutover
+    return !date || date > cutoverDate;
   });
 
   const removedCount = allRows.length - keptRows.length;
   if (removedCount === 0) {
-    log(`Transactions: nothing to remove on or before ${cutoverDate}`);
+    log(`Transactions: nothing to wipe on or before ${cutoverDate}`);
     return;
   }
 
-  // 3. Clear data rows and write back survivors — 2 API calls total
+  // 3. Clear and rewrite — 2 API calls total
   await sheets.spreadsheets.values.clear({
     spreadsheetId: sheetId,
     range: 'Transactions!A2:Z',
@@ -750,8 +652,7 @@ async function removeNonYnabTransactionsBeforeCutover(
     });
   }
 
-  const label = wipe ? 'all' : 'non-ynab_import';
-  log(`Transactions: removed ${removedCount} ${label} row(s) on or before ${cutoverDate}, kept ${keptRows.length}`);
+  log(`Transactions: wiped ${removedCount} row(s) on or before ${cutoverDate}, kept ${keptRows.length} post-cutover`);
 }
 
 // ─── Logging & error helpers ──────────────────────────────────────────────────
@@ -770,7 +671,7 @@ function bail(msg: string): never {
 async function main(): Promise<void> {
   console.log('\n── Zero Budget: Import YNAB Transactions ───────────────────\n');
 
-  const { filePath, cutoverDate, wipe } = parseArgs();
+  const { filePath, cutoverDate } = parseArgs();
   const { sheetId, authConfig } = loadEnv();
 
   const auth = new google.auth.GoogleAuth({
@@ -793,69 +694,39 @@ async function main(): Promise<void> {
   if (filtered > 0) log(`CSV: filtered out ${filtered} rows after cutover date ${cutoverDate}`);
   log(`CSV: ${cutoverRows.length} rows within cutover date`);
 
-  // Remove non-ynab_import rows on or before cutover date (BTS, manual, seed).
-  // Existing ynab_import rows are left in place — the external_id dedup below
-  // will skip them, making re-runs fast (only the delta gets inserted).
-  if (wipe) {
-    log(`Cutover mode (--wipe): removing ALL rows on or before ${cutoverDate} for clean re-import`);
-  } else {
-    log(`Cutover mode: removing non-YNAB rows on or before ${cutoverDate}`);
-  }
-  await removeNonYnabTransactionsBeforeCutover(sheets, sheetId, cutoverDate, wipe);
+  // Wipe all existing rows on or before cutover date (YNAB, BTS, manual, seed)
+  // then write fresh YNAB data. Post-cutover rows (BTS live-sync) are preserved.
+  log(`Wiping all rows on or before ${cutoverDate} for clean re-import`);
+  await wipeCutoverWindow(sheets, sheetId, cutoverDate);
 
   // Load categories from the sheet
   const categoryIndex = await loadCategoryIndex(sheets, sheetId);
   log(`Categories: indexed ${categoryIndex.size} entries from sheet`);
 
-  // Read existing transactions for dedup (after the delete, so only post-cutover rows remain)
-  const existing = await readExistingTransactions(sheets, sheetId);
-  log(`Dedup: loaded ${existing.length} existing transaction(s) from sheet`);
-
   const importedAt = new Date().toISOString();
 
-  // Process groups
+  // Build rows: detect split groups, synthesise parent rows
   const groups = groupRows(cutoverRows);
-
   const rowsToInsert: (string | number)[][] = [];
-  let skipped = 0;
   let splitGroupsFound = 0;
+  let regularRowIndex = 0;
 
   for (const group of groups) {
     if (group.isSplit) {
       splitGroupsFound++;
-
       const { parentRow, parentId, splitGroupId } = buildSplitParentRow(group.rows, importedAt);
       const childRows = buildSplitChildRows(group.rows, parentId, splitGroupId, importedAt, categoryIndex);
-
-      if (checkDedup(parentId, existing) === 'skip') {
-        skipped++;
-        continue;
-      }
-
-      rowsToInsert.push(parentRow);
-
-      for (const childRow of childRows) {
-        const childExtId = childRow[TRANSACTIONS_COLUMNS.indexOf('external_id')] as string;
-        if (checkDedup(childExtId, existing) === 'skip') continue;
-        rowsToInsert.push(childRow);
-      }
+      rowsToInsert.push(parentRow, ...childRows);
     } else {
-      const r = group.rows[0];
-      const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.occurrenceIndex);
-
-      if (checkDedup(externalId, existing) === 'skip') {
-        skipped++;
-        continue;
-      }
-
-      rowsToInsert.push(buildRegularTransactionRow(r, importedAt, categoryIndex));
+      rowsToInsert.push(buildRegularTransactionRow(group.rows[0], importedAt, categoryIndex, regularRowIndex));
+      regularRowIndex++;
     }
   }
 
   log(`Split groups detected: ${splitGroupsFound}`);
-  log(`Dedup: ${skipped} skipped (exact match), ${rowsToInsert.length} to insert`);
+  log(`Transactions: ${rowsToInsert.length} rows to write`);
 
-  // Append new rows
+  // Write all rows in one shot
   if (rowsToInsert.length > 0) {
     await sheets.spreadsheets.values.append({
       spreadsheetId: sheetId,
@@ -864,7 +735,7 @@ async function main(): Promise<void> {
       insertDataOption: 'INSERT_ROWS',
       requestBody: { values: rowsToInsert },
     });
-    log(`Transactions: appended ${rowsToInsert.length} row(s)`);
+    log(`Transactions: wrote ${rowsToInsert.length} row(s)`);
   }
 
   // Write live_sync_from_date to Config tab
