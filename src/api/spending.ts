@@ -71,19 +71,18 @@ export function aggregateSpending(
   categoryGroupMap?: Map<string, string>,    // category → category_group fallback
   categorySubgroupMap?: Map<string, string>, // category → category_subgroup fallback
 ): GroupSpend[] {
-  // Include all non-transfer transactions with a net outflow contribution.
-  // Outflow-only rows are spending; inflow-only rows (refunds, credits, reimbursements)
-  // on spending categories reduce the total. Pure income deposits (inflow > 0, outflow = 0)
-  // are included in the accumulation but their negative net will be filtered out below,
-  // so income groups never appear in the spending view.
+  // Only regular transactions contribute to spending. Transfers, income, and CC payments
+  // each have their own transaction_type and are excluded explicitly. The caller should
+  // pass split children (not split parents) so each category gets its real amount —
+  // use getTransactionsForSpending() rather than getTransactionsByDateRange().
   const relevant = transactions.filter(
     (t) =>
-      t.transaction_type !== 'transfer' &&
-      (t.outflow > 0 || t.inflow > 0) &&
+      t.transaction_type === 'regular' &&
       (selectedCategories === null || selectedCategories.has(t.category)),
   );
 
   // group → subgroup → category → net (outflow - inflow)
+  // inflow > 0 on a regular row means a refund/credit that reduces category spend.
   const byGroup = new Map<string, Map<string, Map<string, number>>>();
 
   for (const t of relevant) {
@@ -102,14 +101,11 @@ export function aggregateSpending(
     .map(([group, subMap]) => {
       const subgroups: SubgroupSpend[] = [...subMap.entries()]
         .map(([subgroup, catMap]) => {
-          // Only include categories with a positive net spend (filters out pure income categories)
           const categories: CategorySpend[] = [...catMap.entries()]
-            .filter(([, total]) => total > 0)
             .map(([category, total]) => ({ category, total }))
             .sort((a, b) => b.total - a.total);
           return { subgroup, total: categories.reduce((s, c) => s + c.total, 0), categories };
         })
-        .filter((sg) => sg.total > 0)
         .sort((a, b) => b.total - a.total);
 
       // Flat category list across all subgroups, sorted by total
@@ -119,6 +115,5 @@ export function aggregateSpending(
 
       return { group, total: categories.reduce((s, c) => s + c.total, 0), subgroups, categories };
     })
-    .filter((g) => g.total > 0)
     .sort((a, b) => b.total - a.total);
 }

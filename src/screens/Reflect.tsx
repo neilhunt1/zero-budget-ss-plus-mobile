@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/schema';
-import { getTransactionsByDateRange, getActiveBudgetCategories } from '../db/queries';
+import { getTransactionsForSpending, getActiveBudgetCategories } from '../db/queries';
 import { aggregateSpending, presetToDateRange, formatDate, type TimeRangePreset, type DateRange } from '../api/spending';
 import HorizontalBarChart from '../components/charts/HorizontalBarChart';
 import SpendPieChart from '../components/charts/SpendPieChart';
@@ -208,7 +208,7 @@ export default function Reflect() {
   }
 
   const transactions = useLiveQuery(
-    () => getTransactionsByDateRange(dateRange.start, dateRange.end),
+    () => getTransactionsForSpending(dateRange.start, dateRange.end),
     [dateRange.start, dateRange.end],
   );
 

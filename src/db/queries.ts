@@ -12,6 +12,21 @@ export async function getTransactionsByDateRange(startDate: string, endDate: str
     .sort((a, b) => b.date.localeCompare(a.date));
 }
 
+/**
+ * Like getTransactionsByDateRange but returns split children instead of split parents.
+ * Split parents have no category (just a total); children carry the real per-category
+ * amounts. Use this for spending aggregation (Reflect).
+ */
+export async function getTransactionsForSpending(startDate: string, endDate: string): Promise<Transaction[]> {
+  const results = await db.transactions
+    .where('date')
+    .between(startDate, endDate, true, true)
+    .toArray();
+  // For non-split transactions: include rows with no parent_id and no split_group_id.
+  // For split transactions: include children (have parent_id); skip the parent summary row.
+  return results.filter((t) => !t.split_group_id || !!t.parent_id);
+}
+
 export async function getTransactionsByMonth(month: string): Promise<Transaction[]> {
   const results = await db.transactions
     .where('date')
