@@ -78,8 +78,7 @@ export async function syncOnOpen(
 
     // Normalize new BTS rows into Transactions tab before fetching,
     // so the fetch below picks them up in the same sync cycle.
-    // Non-fatal: a BTS write failure (e.g. row-range bug, 400 from Sheets)
-    // should not prevent the data reads that follow.
+    // Non-fatal: a BTS write failure should not prevent the data reads that follow.
     try {
       await normalizeBtsTransactions(client);
     } catch (e) {

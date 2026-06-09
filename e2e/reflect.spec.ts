@@ -4,15 +4,15 @@ import { injectServiceAccountAuth } from './fixtures/auth';
 /**
  * Reflect screen E2E tests
  *
- * Seed data used (all May 2026 — visible under "Last Month" preset from June 2026):
- *   seed-001  Amazon         $45.67   Uncategorized   expense   pending
+ * Seed data used (all dated in "last month" — always visible under the "Last Month" preset):
+ *   seed-001  Amazon         $45.67   Uncategorized   regular   pending
  *   seed-002  Employer       $2500    income          income    (excluded from spend)
  *   seed-003  Transfer       $500     transfer        transfer  (excluded from spend)
  *   seed-004  Transfer       $500     transfer        transfer  (excluded from spend)
- *   seed-005  Whole Foods    $89.12   Food & Dining   expense   cleared
- *   seed-006  Netflix        $15.99   Uncategorized   expense   pending
- *   seed-007  Dining Out     $42.50   Food & Dining   expense   cleared
- *   seed-008  Target         $120.00  Uncategorized   expense   cleared
+ *   seed-005  Whole Foods    $89.12   Food & Dining   regular   cleared
+ *   seed-006  Netflix        $15.99   Uncategorized   regular   pending
+ *   seed-007  Dining Out     $42.50   Food & Dining   regular   cleared
+ *   seed-008  Target         $120.00  Uncategorized   regular   cleared
  *
  * Expected spend totals (transfers + income excluded):
  *   Food & Dining  $131.62  ($89.12 + $42.50)
@@ -66,13 +66,17 @@ test.describe('time range presets', () => {
   });
 
   test('date range label appears next to chips for non-custom presets', async ({ page }) => {
-    await expect(page.locator('.preset-date-range')).toContainText('2026');
+    // The label should contain the year of last month (handles January year-wrap correctly)
+    const lastMonthYear = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1)
+      .getFullYear()
+      .toString();
+    await expect(page.locator('.preset-date-range')).toContainText(lastMonthYear);
   });
 });
 
 // ─── Bar chart ────────────────────────────────────────────────────────────────
 
-test.describe('bar chart — Last Month (May 2026 seed data)', () => {
+test.describe('bar chart — Last Month (relative seed data)', () => {
   test.beforeEach(async ({ page }) => {
     test.setTimeout(60_000); // sync can take 20-30s; give headroom
     await selectPreset(page, 'Last Month');
@@ -125,7 +129,7 @@ test.describe('bar chart — Last Month (May 2026 seed data)', () => {
 
 // ─── Pie chart ────────────────────────────────────────────────────────────────
 
-test.describe('pie chart — Last Month (May 2026 seed data)', () => {
+test.describe('pie chart — Last Month (relative seed data)', () => {
   test.beforeEach(async ({ page }) => {
     test.setTimeout(60_000); // sync can take 20-30s; give headroom
     await selectPreset(page, 'Last Month');

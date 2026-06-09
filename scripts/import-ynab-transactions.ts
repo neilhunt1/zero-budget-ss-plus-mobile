@@ -625,7 +625,10 @@ async function wipeCutoverWindow(
     return;
   }
 
-  // 2. Keep only rows strictly after cutoverDate
+  // 2. Keep only rows strictly after cutoverDate — everything on or before is
+  //    wiped so the YNAB import is the clean source of truth for that window.
+  //    After import, live_sync_from_date in Config tells BTS sync to skip
+  //    rows before the cutover so they don't re-appear.
   const keptRows = allRows.filter((row) => {
     const date = (row[dateColIndex] ?? '').trim();
     return !date || date > cutoverDate;
@@ -694,8 +697,8 @@ async function main(): Promise<void> {
   if (filtered > 0) log(`CSV: filtered out ${filtered} rows after cutover date ${cutoverDate}`);
   log(`CSV: ${cutoverRows.length} rows within cutover date`);
 
-  // Wipe all existing rows on or before cutover date (YNAB, BTS, manual, seed)
-  // then write fresh YNAB data. Post-cutover rows (BTS live-sync) are preserved.
+  // Wipe all rows on or before cutover date, then write fresh YNAB data.
+  // live_sync_from_date written below tells BTS sync to start after this date.
   log(`Wiping all rows on or before ${cutoverDate} for clean re-import`);
   await wipeCutoverWindow(sheets, sheetId, cutoverDate);
 

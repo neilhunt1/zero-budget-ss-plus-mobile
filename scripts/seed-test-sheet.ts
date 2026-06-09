@@ -98,18 +98,29 @@ function id(prefix: string): string {
 const NOW = new Date().toISOString();
 const TRANSFER_PAIR = id('t');
 
+// All seed transactions are dated in "last month" so the E2E Reflect tests
+// always see data under the "Last Month" preset regardless of when they run.
+const _now = new Date();
+const _lastMonth = new Date(_now.getFullYear(), _now.getMonth() - 1, 1);
+const _lmYear = _lastMonth.getFullYear();
+const _lmMonth = String(_lastMonth.getMonth() + 1).padStart(2, '0');
+/** Build a YYYY-MM-DD date in last month for the given day-of-month. */
+function lmd(day: number): string {
+  return `${_lmYear}-${_lmMonth}-${String(day).padStart(2, '0')}`;
+}
+
 const SEED: SeedTx[] = [
   // 1. Uncategorized outflow — pending, not reviewed (triage candidate)
   {
     transaction_id: 'seed-001',
     source: 'seed',
     status: 'pending',
-    date: '2026-05-15',
+    date: lmd(15),
     payee: 'Amazon',
     description: 'Amazon purchase',
     outflow: 45.67,
     account: 'Chase Checking',
-    transaction_type: 'expense',
+    transaction_type: 'regular',
     reviewed: false,
     imported_at: NOW,
   },
@@ -119,7 +130,7 @@ const SEED: SeedTx[] = [
     transaction_id: 'seed-002',
     source: 'seed',
     status: 'cleared',
-    date: '2026-05-01',
+    date: lmd(1),
     payee: 'Employer',
     description: 'Payroll',
     inflow: 2500,
@@ -134,7 +145,7 @@ const SEED: SeedTx[] = [
     transaction_id: 'seed-003',
     source: 'seed',
     status: 'cleared',
-    date: '2026-05-10',
+    date: lmd(10),
     payee: 'Transfer to Savings',
     outflow: 500,
     account: 'Chase Checking',
@@ -147,7 +158,7 @@ const SEED: SeedTx[] = [
     transaction_id: 'seed-004',
     source: 'seed',
     status: 'cleared',
-    date: '2026-05-10',
+    date: lmd(10),
     payee: 'Transfer from Checking',
     inflow: 500,
     account: 'Chase Savings',
@@ -162,7 +173,7 @@ const SEED: SeedTx[] = [
     transaction_id: 'seed-005',
     source: 'seed',
     status: 'cleared',
-    date: '2026-05-12',
+    date: lmd(12),
     payee: 'Whole Foods',
     category: 'Groceries 🛒',
     category_subgroup: '',
@@ -170,7 +181,7 @@ const SEED: SeedTx[] = [
     category_type: 'fluid',
     outflow: 89.12,
     account: 'Chase Checking',
-    transaction_type: 'expense',
+    transaction_type: 'regular',
     reviewed: true,
     imported_at: NOW,
   },
@@ -180,11 +191,11 @@ const SEED: SeedTx[] = [
     transaction_id: 'seed-006',
     source: 'seed',
     status: 'pending',
-    date: '2026-05-20',
+    date: lmd(20),
     payee: 'Netflix',
     outflow: 15.99,
     account: 'Chase Visa',
-    transaction_type: 'expense',
+    transaction_type: 'regular',
     reviewed: false,
     imported_at: NOW,
   },
@@ -194,7 +205,7 @@ const SEED: SeedTx[] = [
     transaction_id: 'seed-007',
     source: 'seed',
     status: 'cleared',
-    date: '2026-05-18',
+    date: lmd(18),
     payee: 'Dining Out',
     category: 'Dining Out 🧑‍🍳',
     category_subgroup: '',
@@ -202,7 +213,7 @@ const SEED: SeedTx[] = [
     category_type: 'fluid',
     outflow: 42.50,
     account: 'Chase Visa',
-    transaction_type: 'expense',
+    transaction_type: 'regular',
     reviewed: false,
     imported_at: NOW,
   },
@@ -212,12 +223,12 @@ const SEED: SeedTx[] = [
     transaction_id: 'seed-008',
     source: 'seed',
     status: 'cleared',
-    date: '2026-05-22',
+    date: lmd(22),
     payee: 'Target',
     description: 'Mixed purchase — split candidate',
     outflow: 120.00,
     account: 'Chase Checking',
-    transaction_type: 'expense',
+    transaction_type: 'regular',
     reviewed: false,
     imported_at: NOW,
   },

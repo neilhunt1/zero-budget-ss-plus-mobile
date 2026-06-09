@@ -74,6 +74,29 @@ export function normalizeBtsRow(row: BtsRow): Omit<Transaction, '_rowIndex'> {
 
 // ─── Main normalization function ──────────────────────────────────────────────
 
+// ─── Main normalization function ──────────────────────────────────────────────
+
+/**
+ * Read live_sync_from_date from the Config tab.
+ * Returns null if the Config tab doesn't exist or the key isn't set,
+ * meaning all BTS transactions are eligible for import.
+ */
+async function readLiveSyncFromDate(client: SheetsClient): Promise<string | null> {
+  // This must NOT silently swallow errors — if the Config tab exists and is
+  // readable but the key is missing, that's fine (null = no cutover yet).
+  // But if the read fails entirely, we must NOT return null and accidentally
+  // let BTS re-insert all historical rows. Let the error propagate so the
+  // caller can decide (normalizeBtsTransactions logs and skips on failure).
+  const res = await client.getValues(`${CONFIG_TAB}!A2:B`);
+  for (const row of res.values ?? []) {
+    if (row[0]?.trim() === 'live_sync_from_date') {
+      const val = row[1]?.trim();
+      return val || null;
+    }
+  }
+  return null;
+}
+
 /**
  * Read Transactions (BTS), normalize each row, and write new/updated rows to
  * the canonical Transactions tab.
@@ -81,39 +104,27 @@ export function normalizeBtsRow(row: BtsRow): Omit<Transaction, '_rowIndex'> {
  * Deduplication is based on external_id (BTS Transaction_id). Idempotent —
  * safe to run multiple times. Also handles pending → cleared transitions.
  */
-/**
- * Read live_sync_from_date from the Config tab.
- * Returns null if the Config tab doesn't exist or the key isn't set,
- * meaning all BTS transactions are eligible for import.
- */
-async function readLiveSyncFromDate(client: SheetsClient): Promise<string | null> {
-  try {
-    const res = await client.getValues(`${CONFIG_TAB}!A2:B`);
-    for (const row of res.values ?? []) {
-      if (row[0]?.trim() === 'live_sync_from_date') {
-        const val = row[1]?.trim();
-        return val || null;
-      }
-    }
-  } catch {
-    // Config tab may not exist on older sheets — treat as no cutover set
-  }
-  return null;
-}
-
 export async function normalizeBtsTransactions(
   client: SheetsClient
 ): Promise<{ inserted: number; updated: number }> {
   // Read live_sync_from_date from Config — BTS rows before this date are skipped.
-  // This is the cutover boundary written by the legacy import scripts.
-  const liveSyncFromDate = await readLiveSyncFromDate(client);
+  // This is the cutover boundary written by the import-ynab-transactions script.
+  // If the Config tab is unreadable, we bail rather than inserting everything —
+  // a null cutover would flood the sheet with pre-cutover BTS history.
+  let liveSyncFromDate: string | null;
+  try {
+    liveSyncFromDate = await readLiveSyncFromDate(client);
+  } catch (e) {
+    console.warn('[BTS] Could not read live_sync_from_date from Config tab — skipping BTS normalization to avoid inserting pre-cutover rows:', e);
+    return { inserted: 0, updated: 0 };
+  }
   if (liveSyncFromDate) {
     console.log(`[BTS] live_sync_from_date: ${liveSyncFromDate} — skipping rows before this date`);
+  } else {
+    console.log('[BTS] live_sync_from_date not set — no YNAB import has run yet, all BTS rows eligible');
   }
 
   // Read BTS source tab (header row + data rows).
-  // If the tab doesn't exist yet, skip normalization gracefully so the rest
-  // of the sync (Transactions tab, categories, etc.) can still proceed.
   let btsRes: { values?: string[][] };
   try {
     btsRes = await client.getValues(`${BTS_TAB}!A1:Z`);
