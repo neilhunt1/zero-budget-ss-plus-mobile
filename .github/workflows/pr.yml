@@ -37,8 +37,8 @@ jobs:
           reporter: jest-junit
           fail-on-error: true
 
-  prepare-dev-sheet:
-    name: Provision dev sheet
+  validate-dev-schema:
+    name: Validate dev schema
     runs-on: ubuntu-latest
     needs: unit-tests
     permissions:
@@ -54,46 +54,20 @@ jobs:
 
       - run: npm ci
 
-      - name: Provision dev sheet
+      # Provision dev sheet schema only — confirms migrations work.
+      # Does NOT sync prod data: dev is a developer sandbox and should
+      # not be overwritten by CI. Run sync-from-prod-to-dev manually
+      # whenever you want a prod-like snapshot in dev.
+      - name: Provision dev sheet schema
         run: npm run setup:dev
         env:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
           GOOGLE_SHEET_ID: ${{ secrets.DEV_GOOGLE_SHEET_ID }}
 
-      - name: Sync prod data to dev
-        run: npm run sync-from-prod-to-dev
-        env:
-          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
-          DEV_GOOGLE_SHEET_ID: ${{ secrets.DEV_GOOGLE_SHEET_ID }}
-          PROD_GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-
-  integration-tests:
-    name: Integration tests
+  test-sheet:
+    name: Integration + E2E tests
     runs-on: ubuntu-latest
-    needs: prepare-dev-sheet
-    permissions:
-      contents: read
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: 'npm'
-
-      - run: npm ci
-
-      - name: Run integration tests
-        run: npm run test:integration
-        env:
-          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
-          GOOGLE_SHEET_ID: ${{ secrets.DEV_GOOGLE_SHEET_ID }}
-
-  e2e:
-    name: E2E tests
-    runs-on: ubuntu-latest
-    needs: integration-tests
+    needs: unit-tests
     permissions:
       contents: read
 
@@ -109,8 +83,17 @@ jobs:
 
       - run: npx playwright install chromium --with-deps
 
+      # Reset test sheet to a clean, known state before all tests that use it.
+      # Integration tests and E2E tests both run against this sheet — integration
+      # tests clean up their own rows (by external_id) in afterAll.
       - name: Reset test sheet
         run: npm run setup:test && npm run seed:test
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID_TEST }}
+
+      - name: Run integration tests
+        run: npm run test:integration
         env:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID_TEST }}
