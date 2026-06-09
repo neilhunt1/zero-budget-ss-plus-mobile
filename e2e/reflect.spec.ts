@@ -20,9 +20,9 @@ import { injectServiceAccountAuth } from './fixtures/auth';
  *   Grand total    $313.28
  */
 
-const TOTAL = '$313';        // fmt() rounds to nearest dollar
-const FOOD_TOTAL = '$132';   // $131.62 → $132
-const UNCAT_TOTAL = '$182';  // $181.66 → $182
+const TOTAL = '$313.28';
+const FOOD_TOTAL = '$131.62';
+const UNCAT_TOTAL = '$181.66';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -108,8 +108,8 @@ test.describe('bar chart — Last Month (relative seed data)', () => {
 
     await expect(page.getByText('Groceries 🛒')).toBeVisible();
     await expect(page.getByText('Dining Out 🧑‍🍳')).toBeVisible();
-    await expect(page.getByText('$89')).toBeVisible(); // Whole Foods $89.12
-    await expect(page.getByText('$43')).toBeVisible(); // Dining Out $42.50 → $43
+    await expect(page.getByText('$89.12')).toBeVisible(); // Whole Foods
+    await expect(page.getByText('$42.50')).toBeVisible(); // Dining Out
   });
 
   test('excludes income and transfers', async ({ page }) => {
