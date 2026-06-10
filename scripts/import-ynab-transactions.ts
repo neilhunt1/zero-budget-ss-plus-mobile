@@ -105,9 +105,9 @@ export function mapClearedStatus(cleared: string): 'cleared' | 'pending' {
  * This means auto-imported-but-unapproved cleared transactions will be marked
  * reviewed, which is an acceptable trade-off vs flooding triage with all history.
  */
-export function derivedReviewed(cleared: string): 'TRUE' | 'FALSE' {
+export function derivedReviewed(cleared: string): boolean {
   const v = cleared.trim().toLowerCase();
-  return v === 'cleared' || v === 'reconciled' ? 'TRUE' : 'FALSE';
+  return v === 'cleared' || v === 'reconciled';
 }
 
 /**
@@ -209,7 +209,7 @@ export function groupRows(
 export function buildSplitParentRow(
   group: YnabCsvRow[],
   importedAt: string,
-): { parentRow: (string | number)[]; parentId: string; splitGroupId: string } {
+): { parentRow: (string | number | boolean)[]; parentId: string; splitGroupId: string } {
   const first = group[0];
 
   const totalOutflow = group.reduce((s, r) => s + r.outflow, 0);
@@ -220,7 +220,7 @@ export function buildSplitParentRow(
   const parentId = `YNAB-SPLIT-${first.date}-${accountSafe}-${groupHash}`;
   const splitGroupId = parentId;
 
-  const row = new Array<string | number>(TRANSACTIONS_COLUMNS.length).fill('');
+  const row = new Array<string | number | boolean>(TRANSACTIONS_COLUMNS.length).fill('');
   const col = (name: string) => TRANSACTIONS_COLUMNS.indexOf(name);
 
   row[col('transaction_id')] = parentId;
@@ -257,13 +257,13 @@ export function buildSplitChildRows(
   splitGroupId: string,
   importedAt: string,
   categoryIndex: Map<string, string>,
-): (string | number)[][] {
+): (string | number | boolean)[][] {
   return group.map((r, index) => {
     const externalId = `${parentId}-child-${index}`;
     const canonicalCategory = resolveCategory(r.category, categoryIndex);
     const cleanMemo = stripSplitIndicator(r.memo);
 
-    const row = new Array<string | number>(TRANSACTIONS_COLUMNS.length).fill('');
+    const row = new Array<string | number | boolean>(TRANSACTIONS_COLUMNS.length).fill('');
     const col = (name: string) => TRANSACTIONS_COLUMNS.indexOf(name);
 
     row[col('transaction_id')] = externalId;
@@ -298,11 +298,11 @@ export function buildRegularTransactionRow(
   importedAt: string,
   categoryIndex: Map<string, string>,
   rowIndex: number,
-): (string | number)[] {
+): (string | number | boolean)[] {
   const txId = `YNAB-${shortHash(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, String(rowIndex))}`;
   const canonicalCategory = resolveCategory(r.category, categoryIndex);
 
-  const row = new Array<string | number>(TRANSACTIONS_COLUMNS.length).fill('');
+  const row = new Array<string | number | boolean>(TRANSACTIONS_COLUMNS.length).fill('');
   const col = (name: string) => TRANSACTIONS_COLUMNS.indexOf(name);
 
   row[col('transaction_id')] = txId;
@@ -710,7 +710,7 @@ async function main(): Promise<void> {
 
   // Build rows: detect split groups, synthesise parent rows
   const groups = groupRows(cutoverRows);
-  const rowsToInsert: (string | number)[][] = [];
+  const rowsToInsert: (string | number | boolean)[][] = [];
   let splitGroupsFound = 0;
   let regularRowIndex = 0;
 

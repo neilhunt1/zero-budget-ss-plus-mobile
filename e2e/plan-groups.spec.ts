@@ -13,7 +13,7 @@
  *
  * Project coverage:
  *   desktop-chrome / desktop-webkit : all describe blocks except "mobile layout"
- *   mobile-chrome / mobile-safari   : "Group Envelope row", "Apply Template",
+ *   mobile-chrome / mobile-safari   : "Group Envelope row", "Apply Budget Plan",
  *                                     "mobile layout" (sidebar skipped — not rendered)
  */
 
@@ -175,9 +175,9 @@ test.describe('Plan screen — Group Envelope row', () => {
   });
 });
 
-// ─── Apply Template (desktop + mobile) ───────────────────────────────────────
+// ─── Apply Budget Plan (desktop + mobile) ───────────────────────────────────────
 
-test.describe('Plan screen — Apply Template with group budget', () => {
+test.describe('Plan screen — Apply Budget Plan with group budget', () => {
   test.describe.configure({ mode: 'serial' });
 
   let sharedPage: Page;
@@ -190,8 +190,8 @@ test.describe('Plan screen — Apply Template with group budget', () => {
     await sharedPage?.context().close();
   });
 
-  test('Apply Template button is enabled when a by_group group has a template amount', async () => {
-    const btn = sharedPage.getByRole('button', { name: /Apply Template/i });
+  test('Apply Budget Plan button is enabled when a by_group group has a template amount', async () => {
+    const btn = sharedPage.getByRole('button', { name: /Apply Budget Plan/i });
     await expect(btn).toBeEnabled({ timeout: 5_000 });
   });
 });

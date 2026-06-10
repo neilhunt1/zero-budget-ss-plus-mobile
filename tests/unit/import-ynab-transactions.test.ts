@@ -107,27 +107,27 @@ describe('mapClearedStatus', () => {
 // ─── derivedReviewed ──────────────────────────────────────────────────────────
 
 describe('derivedReviewed', () => {
-  it('returns TRUE for Cleared', () => {
-    expect(derivedReviewed('Cleared')).toBe('TRUE');
+  it('returns true for Cleared', () => {
+    expect(derivedReviewed('Cleared')).toBe(true);
   });
 
-  it('returns TRUE for Reconciled', () => {
-    expect(derivedReviewed('Reconciled')).toBe('TRUE');
+  it('returns true for Reconciled', () => {
+    expect(derivedReviewed('Reconciled')).toBe(true);
   });
 
-  it('returns FALSE for Uncleared', () => {
-    expect(derivedReviewed('Uncleared')).toBe('FALSE');
+  it('returns false for Uncleared', () => {
+    expect(derivedReviewed('Uncleared')).toBe(false);
   });
 
   it('is case-insensitive', () => {
-    expect(derivedReviewed('cleared')).toBe('TRUE');
-    expect(derivedReviewed('RECONCILED')).toBe('TRUE');
-    expect(derivedReviewed('uncleared')).toBe('FALSE');
+    expect(derivedReviewed('cleared')).toBe(true);
+    expect(derivedReviewed('RECONCILED')).toBe(true);
+    expect(derivedReviewed('uncleared')).toBe(false);
   });
 
-  it('returns FALSE for unknown/empty values', () => {
-    expect(derivedReviewed('')).toBe('FALSE');
-    expect(derivedReviewed('unknown')).toBe('FALSE');
+  it('returns false for unknown/empty values', () => {
+    expect(derivedReviewed('')).toBe(false);
+    expect(derivedReviewed('unknown')).toBe(false);
   });
 });
 
@@ -444,15 +444,15 @@ describe('buildRegularTransactionRow', () => {
     expect(row[col('transaction_id')]).toBe(row[col('external_id')]);
   });
 
-  it('sets reviewed TRUE for Cleared transaction', () => {
+  it('sets reviewed true for Cleared transaction', () => {
     const row = buildRegularTransactionRow(r, importedAt, categoryIndex, 0);
-    expect(row[col('reviewed')]).toBe('TRUE');
+    expect(row[col('reviewed')]).toBe(true);
   });
 
-  it('sets reviewed FALSE for Uncleared transaction', () => {
+  it('sets reviewed false for Uncleared transaction', () => {
     const unclearedRow = makeRow({ category: 'Groceries', cleared: 'Uncleared', memo: '' });
     const row = buildRegularTransactionRow(unclearedRow, importedAt, categoryIndex, 0);
-    expect(row[col('reviewed')]).toBe('FALSE');
+    expect(row[col('reviewed')]).toBe(false);
   });
 
   it('preserves memo', () => {

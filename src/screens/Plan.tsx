@@ -339,7 +339,7 @@ export default function Plan() {
             (groups ?? []).every((g) => g.groupTemplateAmount === 0)
           )}
         >
-          {applyingTemplate ? 'Applying…' : 'Apply Template'}
+          {applyingTemplate ? 'Applying…' : 'Apply Budget Plan'}
         </button>
       </header>
 

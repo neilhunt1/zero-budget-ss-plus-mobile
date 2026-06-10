@@ -89,21 +89,27 @@ const BUDGET_LOG_COLUMNS = [
   "note",
 ];
 
-const TABS_IN_ORDER = [
+// Tabs visible to the user (human-managed or human-readable).
+// Order here is the order they appear in the sheet tab bar.
+const TABS_USER_FACING = [
   "Transactions",
   "Budget",
   "Categories",
-  "Dashboard",
   "Groups",
-  "Templates",
+  "Split Rules",
   "Reflect",
+];
+
+// Tabs managed by scripts/BTS — hidden from the tab bar, never manually edited.
+const TABS_PROCESS = [
+  "Meta",           // app state + script config (replaces Dashboard + Config)
   "Budget_Log",
   "Budget_Calcs",
-  "Config",
   "Transactions (BTS)",
   "Balance History (BTS)",
-  "YNAB_Plan_Import",
 ];
+
+const TABS_IN_ORDER = [...TABS_USER_FACING, ...TABS_PROCESS];
 
 const BUDGET_CALCS_COLUMNS = ["month", "category", "activity", "assigned", "available"];
 
@@ -116,7 +122,9 @@ const HEADER_BG_COLOR = { red: 0.29, green: 0.525, blue: 0.91 };
 const HEADER_FG_COLOR = { red: 1, green: 1, blue: 1 };
 
 // Sheet schema version — increment when structure changes
-const SHEET_VERSION = 7;
+// v8: gated formatting/validation steps behind version check (skip on already-current sheets);
+//     formula version check in Budget_Calcs spot-check; open-ended column ranges.
+const SHEET_VERSION = 8;
 
 // ─── Environment Loading ───────────────────────────────────────────────────────
 
@@ -207,6 +215,48 @@ function loadEnv(): { sheetId: string; authConfig: AuthConfig } {
   return { sheetId, authConfig };
 }
 
+// ─── Retry helper ─────────────────────────────────────────────────────────────
+//
+// Google Sheets API returns 503 (service unavailable) or 429 (rate limit) when
+// the script makes too many calls in quick succession or when a large spreadsheet
+// is busy computing formulas. Wrap every API call that can fail transiently.
+
+function isRetryableError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  // 503 = service unavailable (formula computation / quota burst)
+  // 429 = too many requests
+  // ECONNRESET / ETIMEDOUT = transient network blip
+  return (
+    msg.includes('503') ||
+    msg.includes('The service is currently unavailable') ||
+    msg.includes('429') ||
+    msg.includes('ECONNRESET') ||
+    msg.includes('ETIMEDOUT') ||
+    msg.includes('timed out') ||
+    msg.includes('timeout') ||
+    msg.includes('aborted') ||
+    msg.includes('The operation was aborted')
+  );
+}
+
+async function withRetry<T>(
+  label: string,
+  fn: () => Promise<T>,
+  maxAttempts = 5
+): Promise<T> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (attempt === maxAttempts || !isRetryableError(e)) throw e;
+      const delay = Math.min(2 ** attempt * 1000, 30_000); // 2s, 4s, 8s, 16s, 30s cap
+      console.log(`  ⟳ ${label}: transient error (attempt ${attempt}/${maxAttempts}), retrying in ${delay / 1000}s…`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw new Error(`${label}: unreachable`);
+}
+
 // ─── Google Sheets Helpers ────────────────────────────────────────────────────
 
 async function getSheetMetadata(
@@ -215,7 +265,7 @@ async function getSheetMetadata(
 ): Promise<sheets_v4.Schema$Sheet[]> {
   const res = await sheets.spreadsheets.get({
     spreadsheetId: sheetId,
-    fields: "sheets(properties(sheetId,title,hidden))",
+    fields: "sheets(properties(sheetId,title,hidden,gridProperties))",
   });
   return res.data.sheets ?? [];
 }
@@ -272,7 +322,7 @@ async function writeHeaders(
     { title: "Budget", columns: BUDGET_ASSIGNMENTS_COLUMNS },
     { title: "Categories", columns: BUDGET_CATEGORY_COLUMNS },
     { title: "Groups", columns: GROUPS_COLUMNS },
-    { title: "Templates", columns: TEMPLATES_COLUMNS },
+    { title: "Split Rules", columns: TEMPLATES_COLUMNS },
     { title: "Budget_Log", columns: BUDGET_LOG_COLUMNS },
   ];
 
@@ -429,6 +479,17 @@ async function applyConditionalFormatting(
 
   const tabSheetId = txMeta.properties?.sheetId!;
 
+  // Skip if rules already exist on the Transactions tab (re-run guard).
+  // Each run would otherwise append duplicate rules — this just checks for any existing rule.
+  const txSheet = (await sheets.spreadsheets.get({
+    spreadsheetId: sheetId,
+    fields: "sheets(properties(sheetId),conditionalFormats)",
+  })).data.sheets?.find((s) => s.properties?.sheetId === tabSheetId);
+  if ((txSheet?.conditionalFormats ?? []).length > 0) {
+    log("Conditional formatting: rules already present, skipping");
+    return;
+  }
+
   // Column indices (0-based)
   const STATUS_COL = TRANSACTIONS_COLUMNS.indexOf("status");
   const CATEGORY_COL = TRANSACTIONS_COLUMNS.indexOf("category");
@@ -497,10 +558,217 @@ async function applyConditionalFormatting(
     spreadsheetId: sheetId,
     requestBody: { requests },
   });
+  // NOTE: We intentionally do NOT add a CUSTOM_FORMULA rule here for
+  // "category value not in Categories list → orange". The Sheets API v4 rejects
+  // cross-sheet references (e.g. Categories!$C$2:$C$2000) inside CUSTOM_FORMULA
+  // conditions, even though the Sheets UI allows them. The data validation rule
+  // added by addCategoryDataValidation() already shows a warning indicator on
+  // cells with unknown category values, which is sufficient visual feedback.
   log("Conditional formatting: applied to Transactions tab (status + category columns)");
 }
 
+// ─── Step: Category data validation ──────────────────────────────────────────
 
+/**
+ * Add a dropdown data validation to the category column in the Transactions tab.
+ * Source: Categories!$C$2:$C$2000 (the canonical category name list).
+ * Mode: SHOW_WARNING (non-strict) — existing transactions with blank or custom
+ * categories won't be rejected, but invalid values show a warning indicator.
+ */
+async function addCategoryDataValidation(
+  sheets: sheets_v4.Sheets,
+  sheetId: string,
+  sheetMeta: sheets_v4.Schema$Sheet[]
+): Promise<void> {
+  const txMeta = findSheet(sheetMeta, "Transactions");
+  if (!txMeta) return;
+
+  const tabSheetId = txMeta.properties?.sheetId!;
+  const CATEGORY_COL = TRANSACTIONS_COLUMNS.indexOf("category");
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: sheetId,
+    requestBody: {
+      requests: [
+        {
+          setDataValidation: {
+            range: {
+              sheetId: tabSheetId,
+              startRowIndex: 1,       // row 2 (0-based) — skip header
+              startColumnIndex: CATEGORY_COL,
+              endColumnIndex: CATEGORY_COL + 1,
+            },
+            rule: {
+              condition: {
+                type: "ONE_OF_RANGE",
+                values: [{ userEnteredValue: "=Categories!$C$2:$C$2000" }],
+              },
+              showCustomUi: true,     // show dropdown picker
+              strict: false,          // SHOW_WARNING — don't reject, just flag
+            },
+          },
+        },
+      ],
+    },
+  });
+  log("Data validation: category dropdown applied to Transactions tab (Categories!C2:C2000)");
+}
+
+
+
+// ─── Step: Additional data validations ───────────────────────────────────────
+//
+// Beyond the category dropdown on Transactions (addCategoryDataValidation above),
+// we apply:
+//   • reviewed column   → BOOLEAN checkbox
+//   • transaction_type  → ONE_OF_LIST (system-managed enum)
+//   • Budget category   → ONE_OF_RANGE from Categories list
+//   • Categories category_group → ONE_OF_RANGE from Groups list
+//   • Categories category_type  → ONE_OF_LIST (system-managed enum)
+
+async function addAdditionalValidations(
+  sheets: sheets_v4.Sheets,
+  sheetId: string,
+  sheetMeta: sheets_v4.Schema$Sheet[]
+): Promise<void> {
+  const txMeta   = findSheet(sheetMeta, "Transactions");
+  const budgetMeta = findSheet(sheetMeta, "Budget");
+  const catMeta  = findSheet(sheetMeta, "Categories");
+
+  const requests: sheets_v4.Schema$Request[] = [];
+
+  // ── Transactions: reviewed column → checkbox ─────────────────────────────
+  if (txMeta) {
+    const REVIEWED_COL = TRANSACTIONS_COLUMNS.indexOf("reviewed");
+    requests.push({
+      setDataValidation: {
+        range: {
+          sheetId: txMeta.properties?.sheetId!,
+          startRowIndex: 1,
+          startColumnIndex: REVIEWED_COL,
+          endColumnIndex: REVIEWED_COL + 1,
+        },
+        rule: {
+          condition: { type: "BOOLEAN" },
+          showCustomUi: true,
+          strict: true,
+        },
+      },
+    });
+  }
+
+  // ── Transactions: transaction_type → ONE_OF_LIST ──────────────────────────
+  if (txMeta) {
+    const TX_TYPE_COL = TRANSACTIONS_COLUMNS.indexOf("transaction_type");
+    requests.push({
+      setDataValidation: {
+        range: {
+          sheetId: txMeta.properties?.sheetId!,
+          startRowIndex: 1,
+          startColumnIndex: TX_TYPE_COL,
+          endColumnIndex: TX_TYPE_COL + 1,
+        },
+        rule: {
+          condition: {
+            type: "ONE_OF_LIST",
+            values: [
+              { userEnteredValue: "regular" },
+              { userEnteredValue: "transfer" },
+              { userEnteredValue: "credit_payment" },
+              { userEnteredValue: "split_parent" },
+              { userEnteredValue: "split_child" },
+              { userEnteredValue: "income" },
+            ],
+          },
+          showCustomUi: true,
+          strict: false, // warn only — existing legacy values (debit/credit) shouldn't error
+        },
+      },
+    });
+  }
+
+  // ── Budget: category column → ONE_OF_RANGE from Categories ───────────────
+  if (budgetMeta) {
+    const BUDGET_CAT_COL = BUDGET_ASSIGNMENTS_COLUMNS.indexOf("category");
+    requests.push({
+      setDataValidation: {
+        range: {
+          sheetId: budgetMeta.properties?.sheetId!,
+          startRowIndex: 1,
+          startColumnIndex: BUDGET_CAT_COL,
+          endColumnIndex: BUDGET_CAT_COL + 1,
+        },
+        rule: {
+          condition: {
+            type: "ONE_OF_RANGE",
+            values: [{ userEnteredValue: "=Categories!$C$2:$C$2000" }],
+          },
+          showCustomUi: true,
+          strict: false,
+        },
+      },
+    });
+  }
+
+  // ── Categories: category_group → ONE_OF_RANGE from Groups ────────────────
+  if (catMeta) {
+    const CAT_GROUP_COL = BUDGET_CATEGORY_COLUMNS.indexOf("category_group");
+    requests.push({
+      setDataValidation: {
+        range: {
+          sheetId: catMeta.properties?.sheetId!,
+          startRowIndex: 1,
+          startColumnIndex: CAT_GROUP_COL,
+          endColumnIndex: CAT_GROUP_COL + 1,
+        },
+        rule: {
+          condition: {
+            type: "ONE_OF_RANGE",
+            values: [{ userEnteredValue: "=Groups!$A$2:$A$500" }],
+          },
+          showCustomUi: true,
+          strict: false,
+        },
+      },
+    });
+  }
+
+  // ── Categories: category_type → ONE_OF_LIST ───────────────────────────────
+  // These are the system-managed budget behaviour types used in all calcs.
+  if (catMeta) {
+    const CAT_TYPE_COL = BUDGET_CATEGORY_COLUMNS.indexOf("category_type");
+    requests.push({
+      setDataValidation: {
+        range: {
+          sheetId: catMeta.properties?.sheetId!,
+          startRowIndex: 1,
+          startColumnIndex: CAT_TYPE_COL,
+          endColumnIndex: CAT_TYPE_COL + 1,
+        },
+        rule: {
+          condition: {
+            type: "ONE_OF_LIST",
+            values: [
+              { userEnteredValue: "fluid" },
+              { userEnteredValue: "savings_target" },
+              { userEnteredValue: "fixed_bill" },
+            ],
+          },
+          showCustomUi: true,
+          strict: false,
+        },
+      },
+    });
+  }
+
+  if (requests.length > 0) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: { requests },
+    });
+    log("Data validation: reviewed checkbox, transaction_type list, Budget category, Categories group + type");
+  }
+}
 
 // ─── Step: Lock BankToSheets-managed tabs ─────────────────────────────────────
 
@@ -562,31 +830,59 @@ async function lockTab(
   log(`Lock: "${tabTitle}" tab protected (warn on edit)`);
 }
 
-// ─── Step: Hide YNAB import tabs ─────────────────────────────────────────────
+// ─── Step: Migrate legacy tab names ──────────────────────────────────────────
 
-async function hideYnabTabs(
+/**
+ * Rename legacy tabs that have been retired or renamed.
+ * Safe to run repeatedly — skips tabs that are already renamed or don't exist.
+ *
+ * Renames / deletions:
+ *   "Templates"        → "Split Rules"   (clearer name; "Apply Template" button is unrelated)
+ *   "Dashboard"        → "Meta"          (merged with Config; no longer a view tab)
+ *   "Config"           → deleted         (key-value config now lives in Meta rows 6+)
+ *   "YNAB_Plan_Import" → deleted         (retired; import always reads local CSV now)
+ *   "YNAB_Transactions_Import" → deleted (was always empty/reserved)
+ */
+async function migrateLegacyTabs(
   sheets: sheets_v4.Sheets,
   sheetId: string,
   sheetMeta: sheets_v4.Schema$Sheet[]
 ): Promise<void> {
-  const tabsToHide = ["YNAB_Plan_Import"];
   const requests: sheets_v4.Schema$Request[] = [];
 
-  for (const title of tabsToHide) {
-    const meta = findSheet(sheetMeta, title);
-    if (!meta) continue;
-
-    if (meta.properties?.hidden) {
-      log(`Hide: ${title} already hidden, skipping`);
-      continue;
-    }
-
+  // Rename "Templates" → "Split Rules"
+  const oldTemplates = findSheet(sheetMeta, "Templates");
+  const newSplitRules = findSheet(sheetMeta, "Split Rules");
+  if (oldTemplates && !newSplitRules) {
     requests.push({
       updateSheetProperties: {
-        properties: { sheetId: meta.properties?.sheetId, hidden: true },
-        fields: "hidden",
+        properties: { sheetId: oldTemplates.properties?.sheetId, title: "Split Rules" },
+        fields: "title",
       },
     });
+    log('Migrate: renamed "Templates" → "Split Rules"');
+  }
+
+  // Rename "Dashboard" → "Meta" (Config data will be appended by writeMetaTab)
+  const oldDashboard = findSheet(sheetMeta, "Dashboard");
+  const newMeta = findSheet(sheetMeta, "Meta");
+  if (oldDashboard && !newMeta) {
+    requests.push({
+      updateSheetProperties: {
+        properties: { sheetId: oldDashboard.properties?.sheetId, title: "Meta" },
+        fields: "title",
+      },
+    });
+    log('Migrate: renamed "Dashboard" → "Meta"');
+  }
+
+  // Delete retired tabs
+  for (const title of ["Config", "YNAB_Plan_Import", "YNAB_Transactions_Import"]) {
+    const meta = findSheet(sheetMeta, title);
+    if (meta) {
+      requests.push({ deleteSheet: { sheetId: meta.properties?.sheetId } });
+      log(`Migrate: deleted retired tab "${title}"`);
+    }
   }
 
   if (requests.length > 0) {
@@ -594,45 +890,63 @@ async function hideYnabTabs(
       spreadsheetId: sheetId,
       requestBody: { requests },
     });
-    log(`Hide: YNAB import tabs hidden`);
   }
 }
 
-// ─── Step: Write Dashboard ────────────────────────────────────────────────────
+// ─── Step: Write Meta tab ─────────────────────────────────────────────────────
 //
-// Rows 1–4 of the Dashboard tab hold key/value pairs for the live dashboard.
-// Column A = label, Column B = formula or value.
-// Named ranges are created (or updated) so the app and formulas can reference by name.
+// Meta tab layout (replaces Dashboard + Config):
+//   Row 1:    headers — key | value
+//   Row 2:    ReadyToAssign   | live formula
+//   Row 3:    LastYnabSync    | timestamp (written by import scripts)
+//   Row 4:    TotalAssignedThisMonth | live formula
+//   Row 5:    TotalAvailable  | live formula
+//   Rows 6+:  script config key-value pairs (e.g. live_sync_from_date)
+//
+// Named ranges point to column B of rows 2–5 so the app and formulas can
+// reference values by name without caring about row numbers.
+//
+// upsertConfigValue lives in config-tab.ts (imported here and re-exported so
+// callers don't need to import setup-sheet.ts, which has an unguarded main()).
 
-async function writeBudgetDashboard(
+export { upsertConfigValue } from "./config-tab";
+
+async function writeMetaTab(
   sheets: sheets_v4.Sheets,
   sheetId: string,
   sheetMeta: sheets_v4.Schema$Sheet[]
 ): Promise<void> {
-  const meta = findSheet(sheetMeta, "Dashboard");
+  const meta = findSheet(sheetMeta, "Meta");
   if (!meta) return;
 
-  // Check if dashboard is already written
-  const existing = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: "Dashboard!A1:B4",
-  });
+  // Check if Meta tab already has the expected header + dashboard rows.
+  // Read column A only — column B contains live SUM/SUMIF formulas that Google
+  // Sheets evaluates before returning, which blocks for several minutes on large
+  // Transactions datasets. The key labels in column A are plain text; reading
+  // them is instant.
+  const existing = await withRetry("Meta: read labels", () =>
+    sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: "Meta!A1:A5",
+    })
+  );
+  const rows = existing.data.values ?? [];
+  const hasHeader = rows[0]?.[0] === "key";
+  const hasReadyToAssign = rows[1]?.[0] === "ReadyToAssign";
 
-  if (existing.data.values?.[0]?.[0] === "ReadyToAssign") {
-    log("Dashboard: already present, skipping");
-
-    // Even if content is already written, ensure named ranges point to Dashboard tab.
-    await ensureDashboardNamedRanges(sheets, sheetId, meta.properties?.sheetId!);
+  if (hasHeader && hasReadyToAssign) {
+    log("Meta: header + dashboard rows already present, skipping write");
+    log("Meta: ensuring named ranges...");
+    await ensureMetaNamedRanges(sheets, sheetId, meta.properties?.sheetId!);
     return;
   }
 
-  // Assignment data starts at row 2 of Budget tab (row 1 is the header)
   const dataStart = BUDGET_ASSIGNMENTS_START_ROW + 1; // 2
 
-  const dashboardRows = [
+  const metaRows = [
+    ["key", "value"],
     [
       "ReadyToAssign",
-      // inflow col Q, outflow col P; minus total assigned in Budget assignments section
       `=SUM(Transactions!Q2:Q)-SUM(Transactions!P2:P)-SUM(Budget!C${dataStart}:C)`,
     ],
     ["LastYnabSync", ""],
@@ -640,97 +954,75 @@ async function writeBudgetDashboard(
       "TotalAssignedThisMonth",
       `=SUMIF(Budget!A${dataStart}:A,TEXT(TODAY(),"yyyy-mm"),Budget!C${dataStart}:C)`,
     ],
-    [
-      "TotalAvailable",
-      `=Dashboard!B1`,
-    ],
+    ["TotalAvailable", `=Meta!B2`],
   ];
 
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: sheetId,
-    range: "Dashboard!A1",
-    valueInputOption: "USER_ENTERED",
-    requestBody: { values: dashboardRows },
-  });
+  await withRetry("Meta: write rows", () =>
+    sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: "Meta!A1",
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: metaRows },
+    })
+  );
 
-  await ensureDashboardNamedRanges(sheets, sheetId, meta.properties?.sheetId!);
+  await ensureMetaNamedRanges(sheets, sheetId, meta.properties?.sheetId!);
 
-  log("Dashboard: wrote rows 1–4 (ReadyToAssign, LastYnabSync, TotalAssignedThisMonth, TotalAvailable)");
-}
-
-// ─── Step: Write Config tab ───────────────────────────────────────────────────
-//
-// Config tab: key/value pairs written by scripts. Row 1 = headers (key | value).
-// Rows 2+ are key/value entries. Scripts upsert by key; app reads by key.
-// Current keys:
-//   live_sync_from_date  — first date owned by live sync (BTS/Plaid). Set by
-//                          import scripts when --cutover-date is passed.
-//
-// upsertConfigValue lives in config-tab.ts (imported here and re-exported so
-// callers don't need to import setup-sheet.ts, which has an unguarded main()).
-
-export { upsertConfigValue } from "./config-tab";
-
-const CONFIG_HEADERS = ["key", "value"];
-
-async function writeConfigHeaders(
-  sheets: sheets_v4.Sheets,
-  sheetId: string,
-  sheetMeta: sheets_v4.Schema$Sheet[]
-): Promise<void> {
-  const meta = findSheet(sheetMeta, "Config");
-  if (!meta) return;
-
-  const existing = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: `Config!A1:B1`,
-  });
-
-  if (existing.data.values?.[0]?.[0] === "key") {
-    log("Config: headers already present, skipping");
-    return;
-  }
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: sheetId,
-    range: `Config!A1`,
-    valueInputOption: "RAW",
-    requestBody: { values: [CONFIG_HEADERS] },
-  });
-
-  log("Config: wrote headers (key | value)");
+  log("Meta: wrote header row + dashboard rows 2–5 (ReadyToAssign, LastYnabSync, TotalAssignedThisMonth, TotalAvailable)");
 }
 
 /**
- * Create or update named ranges to point to Dashboard tab cells.
- * On v6→v7 migration the named ranges exist but point to the old Budget tab,
- * so we always upsert (update if found, add if not).
+ * Create or update named ranges pointing to Meta!B2:B5.
+ * Always upserts — safe to call on re-runs and after Dashboard→Meta rename.
  */
-async function ensureDashboardNamedRanges(
+async function ensureMetaNamedRanges(
   sheets: sheets_v4.Sheets,
   sheetId: string,
-  dashboardTabSheetId: number
+  metaTabSheetId: number
 ): Promise<void> {
+  // Row indices are 0-based. Dashboard rows are at sheet rows 2–5 (1-based),
+  // which are indices 1–4. Column B = index 1.
   const namedRanges = [
-    { name: "ReadyToAssign", row: 1 },
-    { name: "LastYnabSync", row: 2 },
-    { name: "TotalAssignedThisMonth", row: 3 },
-    { name: "TotalAvailable", row: 4 },
+    { name: "ReadyToAssign",         rowIndex: 1 },
+    { name: "LastYnabSync",          rowIndex: 2 },
+    { name: "TotalAssignedThisMonth", rowIndex: 3 },
+    { name: "TotalAvailable",        rowIndex: 4 },
   ];
 
-  const spreadsheet = await sheets.spreadsheets.get({
-    spreadsheetId: sheetId,
-    fields: "namedRanges",
-  });
+  log("Meta: reading existing named ranges...");
+  const spreadsheet = await withRetry("Meta: read named ranges", () =>
+    sheets.spreadsheets.get({
+      spreadsheetId: sheetId,
+      fields: "namedRanges",
+    })
+  );
   const existingByName = new Map(
     (spreadsheet.data.namedRanges ?? []).map((nr) => [nr.name!, nr])
   );
 
+  // Skip the batchUpdate if all 4 named ranges already point to the right cells.
+  const allCorrect = namedRanges.every((nr) => {
+    const ex = existingByName.get(nr.name);
+    if (!ex) return false;
+    const r = ex.range;
+    return (
+      r?.sheetId === metaTabSheetId &&
+      r?.startRowIndex === nr.rowIndex &&
+      r?.endRowIndex === nr.rowIndex + 1 &&
+      r?.startColumnIndex === 1 &&
+      r?.endColumnIndex === 2
+    );
+  });
+  if (allCorrect) {
+    log("Meta: named ranges already correct, skipping update");
+    return;
+  }
+
   const requests: sheets_v4.Schema$Request[] = namedRanges.map((nr) => {
     const rangeSpec = {
-      sheetId: dashboardTabSheetId,
-      startRowIndex: nr.row - 1,
-      endRowIndex: nr.row,
+      sheetId: metaTabSheetId,
+      startRowIndex: nr.rowIndex,
+      endRowIndex: nr.rowIndex + 1,
       startColumnIndex: 1, // column B
       endColumnIndex: 2,
     };
@@ -754,11 +1046,55 @@ async function ensureDashboardNamedRanges(
     };
   });
 
+  log("Meta: writing named ranges...");
+  await withRetry("Meta: write named ranges", () =>
+    sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: { requests },
+    })
+  );
+  log("Meta: named ranges upserted (ReadyToAssign, LastYnabSync, TotalAssignedThisMonth, TotalAvailable → Meta!B2:B5)");
+}
+
+// ─── Step: Hide process-managed tabs ─────────────────────────────────────────
+//
+// Process tabs (Meta, Budget_Log, Budget_Calcs, BTS tabs) are hidden from the
+// tab bar. They are still fully accessible by scripts and formulas — just not
+// cluttering the user's view. Users who need to inspect them can unhide via
+// View → Hidden sheets.
+
+async function hideProcessTabs(
+  sheets: sheets_v4.Sheets,
+  sheetId: string,
+  sheetMeta: sheets_v4.Schema$Sheet[]
+): Promise<void> {
+  const requests: sheets_v4.Schema$Request[] = [];
+  const toHide: string[] = [];
+
+  for (const title of TABS_PROCESS) {
+    const meta = findSheet(sheetMeta, title);
+    if (!meta) continue;
+    if (meta.properties?.hidden) continue; // already hidden
+
+    requests.push({
+      updateSheetProperties: {
+        properties: { sheetId: meta.properties?.sheetId, hidden: true },
+        fields: "hidden",
+      },
+    });
+    toHide.push(title);
+  }
+
+  if (requests.length === 0) {
+    log("Hide process tabs: all already hidden");
+    return;
+  }
+
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId: sheetId,
     requestBody: { requests },
   });
-  log("Dashboard: named ranges upserted");
+  log(`Hide process tabs: hid ${toHide.length} tab(s): ${toHide.join(", ")}`);
 }
 
 // ─── Step: Write Budget_Calcs Formulas ────────────────────────────────────────
@@ -795,10 +1131,12 @@ async function writeBudgetCalcs(
 
   // Read active categories from the user-managed Categories tab.
   // Columns: category_group(0), subgroup(1), category(2), type(3), template(4), sort_order(5), active(6)
-  const catRes = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: `Categories!A${CATEGORIES_START_ROW}:G${CATEGORIES_END_ROW}`,
-  });
+  const catRes = await withRetry("Budget_Calcs: read categories", () =>
+    sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: `Categories!A${CATEGORIES_START_ROW}:G${CATEGORIES_END_ROW}`,
+    })
+  );
   const cats = (catRes.data.values ?? [])
     .filter((r) => r[2] && (r[6] ?? "").toString().toUpperCase() === "TRUE")
     .map((r) => ({ category: r[2] as string, sort_order: parseInt(r[5] ?? "0") || 0 }))
@@ -816,34 +1154,81 @@ async function writeBudgetCalcs(
   const HEADER_ROW = 1;
   const DATA_START = HEADER_ROW + 1;
 
+  // ── Skip check ────────────────────────────────────────────────────────────
+  // Rewriting 60+ months × 100 categories is expensive. Skip it if the tab
+  // already has the right shape: grid is large enough AND the first/last month
+  // cells match what we'd write. Categories changing or the month window
+  // rolling past an edge will both trigger a rewrite.
+  const requiredRows = DATA_START + months.length * N; // e.g. 2 + 6161 = 6163
+  const currentRowCount = meta.properties?.gridProperties?.rowCount ?? 0;
+  if (currentRowCount >= requiredRows) {
+    // Spot-check first data row (month + category) and last data row (month).
+    const lastDataRow = DATA_START + months.length * N - 1;
+    const spotCheck = await withRetry("Budget_Calcs: spot-check", () =>
+      sheets.spreadsheets.values.batchGet({
+        spreadsheetId: sheetId,
+        // FORMULA render option: plain-text cells (month, category) return
+        // unchanged; formula cells return the formula string so we can detect
+        // outdated patterns (e.g. old $5000 row cap).
+        valueRenderOption: "FORMULA",
+        ranges: [
+          `Budget_Calcs!A${DATA_START}:C${DATA_START}`,
+          `Budget_Calcs!A${lastDataRow}`,
+        ],
+      })
+    );
+    const firstRow = spotCheck.data.valueRanges?.[0]?.values?.[0] ?? [];
+    const lastRow  = spotCheck.data.valueRanges?.[1]?.values?.[0] ?? [];
+    const firstMonthOk  = firstRow[0] === months[0];
+    const firstCatOk    = firstRow[1] === cats[0].category;
+    const lastMonthOk   = lastRow[0]  === months[months.length - 1];
+    // Check that the activity formula doesn't use the old hardcoded $5000 row cap.
+    const activityFx    = String(firstRow[2] ?? "");
+    const formulasOk    = activityFx.length > 0 && !activityFx.includes("$5000");
+    if (firstMonthOk && firstCatOk && lastMonthOk && formulasOk) {
+      log(`Budget_Calcs: already up to date (${months.length} months × ${N} categories, rows ${DATA_START}–${lastDataRow}), skipping rewrite`);
+      return;
+    }
+    // Log which check(s) failed to make future debugging easier.
+    const reasons: string[] = [];
+    if (!firstMonthOk)  reasons.push(`firstMonth: sheet="${firstRow[0]}" expected="${months[0]}"`);
+    if (!firstCatOk)    reasons.push(`firstCat: sheet="${firstRow[1]}" expected="${cats[0].category}"`);
+    if (!lastMonthOk)   reasons.push(`lastMonth (row ${lastDataRow}): sheet="${lastRow[0]}" expected="${months[months.length - 1]}"`);
+    if (!formulasOk)    reasons.push(`formula outdated (old $5000 cap or empty)`);
+    log(`Budget_Calcs: rewriting — ${reasons.join("; ")}`);
+  }
+
   // Ensure the grid is large enough before writing. New tabs default to 1000
   // rows which is often insufficient for months × categories.
-  const requiredRows = DATA_START + months.length * N;
   const tabSheetId = meta.properties?.sheetId!;
-  const currentRowCount = meta.properties?.gridProperties?.rowCount ?? 0;
   if (currentRowCount < requiredRows) {
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: sheetId,
-      requestBody: {
-        requests: [{
-          updateSheetProperties: {
-            properties: {
-              sheetId: tabSheetId,
-              gridProperties: { rowCount: requiredRows },
+    await withRetry("Budget_Calcs: expand grid", () =>
+      sheets.spreadsheets.batchUpdate({
+        spreadsheetId: sheetId,
+        requestBody: {
+          requests: [{
+            updateSheetProperties: {
+              properties: {
+                sheetId: tabSheetId,
+                gridProperties: { rowCount: requiredRows },
+              },
+              fields: "gridProperties.rowCount",
             },
-            fields: "gridProperties.rowCount",
-          },
-        }],
-      },
-    });
+          }],
+        },
+      })
+    );
     log(`Budget_Calcs: expanded grid to ${requiredRows} rows`);
   }
 
-  // Always clear and rewrite so month window and categories stay current.
-  await sheets.spreadsheets.values.clear({
-    spreadsheetId: sheetId,
-    range: "Budget_Calcs",
-  });
+  // Clear and rewrite. Each operation is wrapped individually so a transient
+  // error mid-write is retried in place rather than restarting from the clear.
+  await withRetry("Budget_Calcs: clear", () =>
+    sheets.spreadsheets.values.clear({
+      spreadsheetId: sheetId,
+      range: "Budget_Calcs",
+    })
+  );
   const assignDataStart = BUDGET_ASSIGNMENTS_START_ROW + 1; // 2
 
   // Build all formula rows. Row R for monthIdx m, catIdx c = DATA_START + m*N + c.
@@ -859,14 +1244,17 @@ async function writeBudgetCalcs(
       // SUMIFS with date range bounds is much faster than SUMPRODUCT+TEXT() array expansion.
       const monthStart = `DATEVALUE(A${R}&"-01")`;
       const monthEnd = `EDATE(${monthStart},1)`;
-      const txBase = `Transactions!$K$2:$K$5000,B${R},Transactions!$H$2:$H$5000,">="&${monthStart},Transactions!$H$2:$H$5000,"<"&${monthEnd},Transactions!$B$2:$B$5000,"",Transactions!$T$2:$T$5000,"<>transfer"`;
+      // Open-ended column ranges (no row cap) so formulas automatically cover
+      // all current and future rows. Google Sheets handles unbounded SUMIFS
+      // efficiently — it does not scan blank rows once data ends.
+      const txBase = `Transactions!$K$2:$K,B${R},Transactions!$H$2:$H,">="&${monthStart},Transactions!$H$2:$H,"<"&${monthEnd},Transactions!$B$2:$B,"",Transactions!$T$2:$T,"<>transfer"`;
       const activityFormula =
-        `=SUMIFS(Transactions!$P$2:$P$5000,${txBase})` +
-        `-SUMIFS(Transactions!$Q$2:$Q$5000,${txBase})`;
+        `=SUMIFS(Transactions!$P$2:$P,${txBase})` +
+        `-SUMIFS(Transactions!$Q$2:$Q,${txBase})`;
 
       // Assigned: sum of all assignment rows for this category+month.
       const assignedFormula =
-        `=SUMIFS(Budget!$C$${assignDataStart}:$C$5000,Budget!$A$${assignDataStart}:$A$5000,A${R},Budget!$B$${assignDataStart}:$B$5000,B${R})`;
+        `=SUMIFS(Budget!$C$${assignDataStart}:$C,Budget!$A$${assignDataStart}:$A,A${R},Budget!$B$${assignDataStart}:$B,B${R})`;
 
       // Available: previous month's available + this month's assigned − activity.
       // First month block has no prior row so rollover is 0.
@@ -879,29 +1267,52 @@ async function writeBudgetCalcs(
   }
 
   // Write header row
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: sheetId,
-    range: "Budget_Calcs!A1",
-    valueInputOption: "RAW",
-    requestBody: { values: [BUDGET_CALCS_COLUMNS] },
-  });
+  await withRetry("Budget_Calcs: write header", () =>
+    sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: "Budget_Calcs!A1",
+      valueInputOption: "RAW",
+      requestBody: { values: [BUDGET_CALCS_COLUMNS] },
+    })
+  );
 
   // Write formula rows in yearly chunks to stay well within API payload limits.
+  // Each chunk is individually retried so an abort mid-write doesn't restart
+  // the entire clear+write sequence.
+  //
+  // Columns A:B (month, category) are plain text — written with RAW so Google
+  // Sheets does NOT interpret "2023-06" as a date serial. Columns C:E are
+  // formulas — written with USER_ENTERED so Sheets evaluates them.
   const CHUNK_MONTHS = 12;
   const rowsPerChunk = CHUNK_MONTHS * N;
   for (let start = 0; start < rows.length; start += rowsPerChunk) {
     const chunk = rows.slice(start, start + rowsPerChunk);
     const startRow = DATA_START + start;
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: sheetId,
-      range: `Budget_Calcs!A${startRow}`,
-      valueInputOption: "USER_ENTERED",
-      requestBody: { values: chunk },
-    });
+    const endRow = startRow + chunk.length - 1;
+
+    // Pass 1: month + category as raw text (A:B)
+    await withRetry(`Budget_Calcs: write text chunk @ row ${startRow}`, () =>
+      sheets.spreadsheets.values.update({
+        spreadsheetId: sheetId,
+        range: `Budget_Calcs!A${startRow}:B${endRow}`,
+        valueInputOption: "RAW",
+        requestBody: { values: chunk.map((r) => [r[0], r[1]]) },
+      })
+    );
+
+    // Pass 2: formulas (C:E) — must be USER_ENTERED so Sheets parses "=..."
+    await withRetry(`Budget_Calcs: write formula chunk @ row ${startRow}`, () =>
+      sheets.spreadsheets.values.update({
+        spreadsheetId: sheetId,
+        range: `Budget_Calcs!C${startRow}:E${endRow}`,
+        valueInputOption: "USER_ENTERED",
+        requestBody: { values: chunk.map((r) => [r[2], r[3], r[4]]) },
+      })
+    );
   }
 
   // Freeze the header row.
-  await sheets.spreadsheets.batchUpdate({
+  await withRetry("Budget_Calcs: freeze header", () => sheets.spreadsheets.batchUpdate({
     spreadsheetId: sheetId,
     requestBody: {
       requests: [
@@ -932,7 +1343,7 @@ async function writeBudgetCalcs(
         },
       ],
     },
-  });
+  }));
 
   log(`Budget_Calcs: wrote ${rows.length} rows (${months.length} months × ${N} categories)`);
 }
@@ -1220,6 +1631,12 @@ async function main(): Promise<void> {
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
 
+  // Set a global 120-second timeout on all API calls. Without this, the googleapis
+  // HTTP client has no timeout and will hang indefinitely if Google Sheets is busy
+  // computing heavy formulas (e.g. SUM over entire Transactions columns).
+  // 120s is needed for large writeBudgetCalcs chunk writes (600+ formula rows each).
+  google.options({ timeout: 120_000 });
+
   const sheets = google.sheets({ version: "v4", auth });
   log("Authenticated with Google Sheets API");
 
@@ -1227,45 +1644,97 @@ async function main(): Promise<void> {
   let sheetMeta = await getSheetMetadata(sheets, sheetId);
   log(`Found ${sheetMeta.length} existing tab(s)`);
 
+  // 4a. Read current sheet version BEFORE any writes, so we can skip formatting
+  // steps that are already up to date. One cheap read here avoids 5+ batchUpdate
+  // calls (headers, widths, conditional formatting, two validation passes) that
+  // hit the API rate limit on every run even when nothing has changed.
+  const existingVersionRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: "Reflect!A1:B1",
+  }).catch(() => ({ data: { values: undefined } }));
+  const existingVersion = Number(existingVersionRes.data.values?.[0]?.[1] ?? 0);
+  const versionCurrent = (
+    existingVersionRes.data.values?.[0]?.[0] === "sheet_version" &&
+    existingVersion === SHEET_VERSION
+  );
+
+  // 4b. Migrate legacy tab names (rename/delete retired tabs before ensureTabsExist)
+  await migrateLegacyTabs(sheets, sheetId, sheetMeta);
+  // Refresh sheetMeta after migrations — use the same lightweight fields as
+  // getSheetMetadata (no protectedRanges — lockTab fetches those separately).
+  sheetMeta = await getSheetMetadata(sheets, sheetId);
+
   // 5. Ensure all tabs exist (Categories and Dashboard created here if new)
+  const tabCountBefore = sheetMeta.length;
   sheetMeta = await ensureTabsExist(sheets, sheetId, sheetMeta);
+  const newTabsCreated = sheetMeta.length > tabCountBefore;
 
   // 5a. Migrate v6 → v7: move Budget category/dashboard data to dedicated tabs
   await migrateV6ToV7(sheets, sheetId);
 
-  // 6. Write headers + freeze + format
-  await writeHeaders(sheets, sheetId, sheetMeta);
+  // 6. Write Meta tab FIRST — before any other writes. The Meta tab contains
+  // live SUM/SUMIF formulas (ReadyToAssign etc.) that Google Sheets must
+  // evaluate before serving any values.get on this spreadsheet. If we run
+  // writeMetaTab after many batchUpdate/values.update calls (which invalidate
+  // the formula cache), the subsequent values.get hangs waiting for a full
+  // recalculation. Running it here, while the sheet is idle, keeps it fast.
+  await writeMetaTab(sheets, sheetId, sheetMeta);
 
-  // 7. Set column widths
-  await setColumnWidths(sheets, sheetId, sheetMeta);
+  // Steps 7–9b (headers, widths, formatting, validations) are all idempotent
+  // batchUpdate calls. Skip them when the sheet is already at the current version
+  // and no new tabs were created — this avoids exhausting the API rate limit on
+  // every run with calls that change nothing.
+  const needsFormatting = !versionCurrent || newTabsCreated;
+  if (needsFormatting) {
+    log(`Formatting: running full pass (version=${existingVersion}→${SHEET_VERSION}, newTabs=${newTabsCreated})`);
+  } else {
+    log(`Formatting: sheet already at v${SHEET_VERSION}, skipping header/width/formatting/validation steps`);
+  }
 
-  // 8. Apply conditional formatting to Transactions
-  await applyConditionalFormatting(sheets, sheetId, sheetMeta);
+  // 7. Write headers + freeze + format
+  if (needsFormatting) {
+    await withRetry("writeHeaders", () => writeHeaders(sheets, sheetId, sheetMeta));
+  }
+
+  // 8. Set column widths
+  if (needsFormatting) {
+    await withRetry("setColumnWidths", () => setColumnWidths(sheets, sheetId, sheetMeta));
+  }
+
+  // 9. Apply conditional formatting to Transactions
+  if (needsFormatting) {
+    await withRetry("applyConditionalFormatting", () => applyConditionalFormatting(sheets, sheetId, sheetMeta));
+  }
+
+  // 9a. Category data validation (dropdown from Categories list)
+  if (needsFormatting) {
+    await withRetry("addCategoryDataValidation", () => addCategoryDataValidation(sheets, sheetId, sheetMeta));
+  }
+
+  // 9b. Additional validations: reviewed checkbox, transaction_type, Budget category, Categories group+type
+  if (needsFormatting) {
+    await withRetry("addAdditionalValidations", () => addAdditionalValidations(sheets, sheetId, sheetMeta));
+  }
 
   // 10. Lock BankToSheets-managed tabs
-  await lockBankToSheetsRaw(sheets, sheetId, sheetMeta);
-  await lockTab(sheets, sheetId, sheetMeta, "Balance History (BTS)");
+  await withRetry("lockBankToSheetsRaw", () => lockBankToSheetsRaw(sheets, sheetId, sheetMeta));
+  await withRetry("lockBalanceHistory", () => lockTab(sheets, sheetId, sheetMeta, "Balance History (BTS)"));
 
-  // 11. Hide YNAB import tabs
-  await hideYnabTabs(sheets, sheetId, sheetMeta);
-
-  // 12. Write Budget dashboard header (rows 1–5) with named ranges
-  await writeBudgetDashboard(sheets, sheetId, sheetMeta);
-
-  // 12a. Write Config tab headers
-  await writeConfigHeaders(sheets, sheetId, sheetMeta);
+  // 11. Hide process-managed tabs (Meta, Budget_Log, Budget_Calcs, BTS tabs)
+  await withRetry("hideProcessTabs", () => hideProcessTabs(sheets, sheetId, sheetMeta));
 
   // 13. Write Budget_Calcs formulas (activity + available with rollover, per category per month)
-  await writeBudgetCalcs(sheets, sheetId, sheetMeta);
+  // Most expensive step — clears and rewrites 60+ months × N category rows.
+  await withRetry("writeBudgetCalcs", () => writeBudgetCalcs(sheets, sheetId, sheetMeta));
 
   // 14. Write sheet version
-  await writeSheetVersion(sheets, sheetId);
+  await withRetry("writeSheetVersion", () => writeSheetVersion(sheets, sheetId));
 
   // 15. Sync Groups tab — add any new groups derived from Categories tab (preserves existing settings)
-  await syncGroupsTab(sheets, sheetId, sheetMeta);
+  await withRetry("syncGroupsTab", () => syncGroupsTab(sheets, sheetId, sheetMeta));
 
   // 16. Clean up orphaned assignment rows (month stored as date serial instead of YYYY-MM text)
-  await cleanOrphanedAssignmentRows(sheets, sheetId, sheetMeta);
+  await withRetry("cleanOrphanedAssignmentRows", () => cleanOrphanedAssignmentRows(sheets, sheetId, sheetMeta));
 
   console.log(
     "\n── Setup complete ───────────────────────────────────────────\n"

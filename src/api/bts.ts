@@ -4,7 +4,7 @@ import { appendTransactions, updateTransactionFields } from './transactions';
 
 const BTS_TAB = 'Transactions (BTS)';
 const TRANSACTIONS_EXT_ID_RANGE = 'Transactions!E2:G'; // external_id(E), status(G)
-const CONFIG_TAB = 'Config';
+const CONFIG_TAB = 'Meta';
 
 // ─── Pure helpers (exported for unit tests) ───────────────────────────────────
 
@@ -82,19 +82,26 @@ export function normalizeBtsRow(row: BtsRow): Omit<Transaction, '_rowIndex'> {
  * meaning all BTS transactions are eligible for import.
  */
 async function readLiveSyncFromDate(client: SheetsClient): Promise<string | null> {
-  // This must NOT silently swallow errors — if the Config tab exists and is
-  // readable but the key is missing, that's fine (null = no cutover yet).
-  // But if the read fails entirely, we must NOT return null and accidentally
-  // let BTS re-insert all historical rows. Let the error propagate so the
-  // caller can decide (normalizeBtsTransactions logs and skips on failure).
-  const res = await client.getValues(`${CONFIG_TAB}!A2:B`);
-  for (const row of res.values ?? []) {
-    if (row[0]?.trim() === 'live_sync_from_date') {
-      const val = row[1]?.trim();
-      return val || null;
+  // "Unable to parse range" means the Config tab doesn't exist yet (no import
+  // has run against this sheet). Treat as null — no cutover set, BTS owns all dates.
+  // All other errors propagate: the caller will bail rather than flood the sheet.
+  try {
+    const res = await client.getValues(`${CONFIG_TAB}!A2:B`);
+    for (const row of res.values ?? []) {
+      if (row[0]?.trim() === 'live_sync_from_date') {
+        const val = row[1]?.trim();
+        return val || null;
+      }
     }
+    return null;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes('Unable to parse range') || msg.includes('notFound')) {
+      // Config tab doesn't exist — no import has run, no cutover boundary
+      return null;
+    }
+    throw e; // real error — propagate so caller skips BTS normalization
   }
-  return null;
 }
 
 /**

@@ -35,7 +35,7 @@ The repo is `neilhunt1/zero-budget-ss-plus-mobile`.
 
 **Critical:** Never run setup:prod or any prod script during a PR workflow. Prod is only touched post-merge or by explicit manual run.
 
-Dev sheet is always refreshed from prod before PR testing via `sync-from-prod-to-dev`.
+Dev sheet can be refreshed from prod manually via `sync-from-prod-to-dev` (not part of CI).
 
 ---
 
@@ -43,9 +43,10 @@ Dev sheet is always refreshed from prod before PR testing via `sync-from-prod-to
 
 ### PR workflow (pr.yml)
 1. `npm test` — unit tests, must pass
-2. `npm run setup:dev` — provision dev sheet to latest schema
-3. `npm run sync-from-prod-to-dev` — clone prod data to dev
-4. `npm run test:integration` — integration tests against dev sheet
+2. `npm run setup:dev` — provision dev sheet schema (validate migrations run cleanly; no data sync)
+3. `npm run setup:test && npm run seed:test` — reset test sheet to known state
+4. `npm run test:integration` — integration tests against test sheet
+5. E2E tests against test sheet
 
 ### Merge workflow (main.yml)
 1. `npm test` — unit tests, must pass
@@ -64,18 +65,25 @@ export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json
 ## Google Sheet structure
 
 ### Tabs
+
+**User-facing** (visible in tab bar, human-editable or human-readable):
 | Tab | Purpose | Editable by scripts |
 |---|---|---|
 | Transactions | All transactions, single source of truth | Yes |
 | Budget | Monthly assignments only (row 1 = headers, rows 2+ = data) | Yes |
 | Categories | Category definitions — **user-owned data, edit directly in sheet** | Seed only (first run) |
-| Dashboard | ReadyToAssign, LastYnabSync, TotalAssigned, TotalAvailable formulas | Yes |
 | Groups | Group budget settings (budget_type, rollover, etc.) | Append-only |
-| Templates | Recurring split templates | Yes |
+| Split Rules | Auto-split transaction rules (match payee → split into categories) | Yes |
 | Reflect | Charts and summaries | Read only |
-| BankToSheets_Raw | BankToSheets writes here | No — BTS owned |
-| YNAB_Plan_Import | YNAB Plan CSV pasted here by user | Read only by scripts |
-| YNAB_Transactions_Import | Reserved for M4 YNAB transaction import | Read only by scripts |
+
+**Process-managed** (hidden from tab bar, never manually edited):
+| Tab | Purpose | Editable by scripts |
+|---|---|---|
+| Meta | App state + script config (replaces Dashboard + Config) | Yes |
+| Budget_Log | Audit trail of budget changes | Yes |
+| Budget_Calcs | Per-category per-month activity/assigned/available formulas | Yes (rewritten on setup) |
+| Transactions (BTS) | BankToSheets raw source data | No — BTS owned |
+| Balance History (BTS) | BankToSheets account balance history | No — BTS owned |
 
 ### Tab layouts
 **Budget tab** (assignments only):
@@ -91,21 +99,23 @@ Rows 2+: Category data (editable directly in the sheet)
 ```
 setup-sheet.ts seeds this from `categories.json` only when the tab is empty. After that, the user owns it.
 
-**Dashboard tab**:
+**Meta tab** (process-managed, hidden):
 ```
-Row 1:   ReadyToAssign  | <live formula>
-Row 2:   LastYnabSync   | <timestamp>
-Row 3:   TotalAssignedThisMonth | <live formula>
-Row 4:   TotalAvailable | <live formula>
+Row 1:   key                    | value   ← headers
+Row 2:   ReadyToAssign          | <live formula>
+Row 3:   LastYnabSync           | <timestamp written by import scripts>
+Row 4:   TotalAssignedThisMonth | <live formula>
+Row 5:   TotalAvailable         | <live formula>
+Rows 6+: script config key-value pairs (e.g. live_sync_from_date)
 ```
 
 Constants `ASSIGNMENTS_START_ROW`, `CATEGORIES_START_ROW` etc. are defined in `src/api/budget.ts`. Always use these constants — never hardcode row numbers.
 
 ### Named ranges
-- `ReadyToAssign` → Dashboard!B1 (live formula)
-- `LastYnabSync` → Dashboard!B2 (written by sync-from-ynab)
-- `TotalAssignedThisMonth` → Dashboard!B3
-- `TotalAvailable` → Dashboard!B4
+- `ReadyToAssign` → Meta!B2 (live formula)
+- `LastYnabSync` → Meta!B3 (written by import scripts)
+- `TotalAssignedThisMonth` → Meta!B4
+- `TotalAvailable` → Meta!B5
 
 ### Column rules
 - **Always append new columns to the right** — never insert in the middle
@@ -125,7 +135,7 @@ Constants `ASSIGNMENTS_START_ROW`, `CATEGORIES_START_ROW` etc. are defined in `s
 ### Budget assignment source values
 - `ynab_import` — written by sync-from-ynab script (wiped on re-run)
 - `manual` — assigned by user via app
-- `template` — applied by Apply Template feature
+- `template` — applied by Apply Budget Plan feature
 - **Only `ynab_import` rows are ever wiped by scripts — never touch manual or template rows**
 
 ### Category name conventions

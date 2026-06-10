@@ -12,19 +12,18 @@ describe('selectTabsToCopy', () => {
     const all = [
       'Transactions',
       'Budget',
-      'Templates',
+      'Split Rules',
       'Balance History (BTS)',
-      'YNAB_Plan_Import',
+      'Transactions (BTS)',
       'BankToSheets_Raw',
       'Reflect',
-      'YNAB_Transactions_Import',
     ];
     expect(selectTabsToCopy(all)).toEqual([
       'Transactions',
       'Budget',
-      'Templates',
+      'Split Rules',
       'Balance History (BTS)',
-      'YNAB_Plan_Import',
+      'Transactions (BTS)',
     ]);
   });
 
@@ -37,8 +36,8 @@ describe('selectTabsToCopy', () => {
   });
 
   it('preserves TABS_TO_COPY order regardless of input order', () => {
-    const result = selectTabsToCopy(['Budget', 'YNAB_Plan_Import', 'Transactions']);
-    expect(result).toEqual(['Transactions', 'Budget', 'YNAB_Plan_Import']);
+    const result = selectTabsToCopy(['Budget', 'Split Rules', 'Transactions']);
+    expect(result).toEqual(['Transactions', 'Budget', 'Split Rules']);
   });
 
   it('returns empty array for empty input', () => {
@@ -63,11 +62,11 @@ describe('buildTabSpec', () => {
     expect(spec.writeStartRange).toBe('Budget!A2');
   });
 
-  it('Templates: full wipe-and-rewrite from row 1', () => {
-    const spec = buildTabSpec('Templates');
-    expect(spec.readRange).toBe('Templates!A1:ZZ');
-    expect(spec.clearRange).toBe('Templates!A:ZZ');
-    expect(spec.writeStartRange).toBe('Templates!A1');
+  it('Split Rules: full wipe-and-rewrite from row 1', () => {
+    const spec = buildTabSpec('Split Rules');
+    expect(spec.readRange).toBe("'Split Rules'!A1:ZZ");
+    expect(spec.clearRange).toBe("'Split Rules'!A:ZZ");
+    expect(spec.writeStartRange).toBe("'Split Rules'!A1");
   });
 
   it('Balance History (BTS): quotes tab name correctly for Sheets range syntax', () => {
@@ -75,13 +74,6 @@ describe('buildTabSpec', () => {
     expect(spec.readRange).toBe("'Balance History (BTS)'!A1:ZZ");
     expect(spec.clearRange).toBe("'Balance History (BTS)'!A:ZZ");
     expect(spec.writeStartRange).toBe("'Balance History (BTS)'!A1");
-  });
-
-  it('YNAB_Plan_Import: full wipe-and-rewrite from row 1', () => {
-    const spec = buildTabSpec('YNAB_Plan_Import');
-    expect(spec.readRange).toBe('YNAB_Plan_Import!A1:ZZ');
-    expect(spec.clearRange).toBe('YNAB_Plan_Import!A:ZZ');
-    expect(spec.writeStartRange).toBe('YNAB_Plan_Import!A1');
   });
 
   it('tabName is preserved on the spec', () => {

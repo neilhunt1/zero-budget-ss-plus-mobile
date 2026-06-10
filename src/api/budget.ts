@@ -41,11 +41,11 @@ function parseCategoryRow(row: string[], rowIndex: number): BudgetCategory {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Fetch the Ready to Assign balance from Dashboard!B1 (the sheet formula).
+ * Fetch the Ready to Assign balance from Meta!B2 (the sheet formula).
  * The sheet formula is authoritative — it spans all months and transactions.
  */
 export async function fetchReadyToAssign(client: SheetsClient): Promise<number> {
-  const res = await client.getValues('Dashboard!B1');
+  const res = await client.getValues('Meta!B2');
   const raw = (res.values?.[0]?.[0] ?? '0').toString().replace(/^'/, '');
   return parseFloat(raw) || 0;
 }

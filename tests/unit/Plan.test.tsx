@@ -354,17 +354,17 @@ describe('Plan screen — apply template', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
   });
 
-  it('renders the Apply Template button', async () => {
+  it('renders the Apply Budget Plan button', async () => {
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
-    expect(await screen.findByRole('button', { name: /Apply Template/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Apply Budget Plan/i })).toBeInTheDocument();
   });
 
   it('button is disabled when no categories have a template amount', async () => {
     mockGetActiveBudgetCategories.mockResolvedValue([makeCatWithTemplate({ monthly_template_amount: 0 })]);
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
-    const btn = await screen.findByRole('button', { name: /Apply Template/i });
+    const btn = await screen.findByRole('button', { name: /Apply Budget Plan/i });
     await waitFor(() => expect(btn).toBeDisabled());
   });
 
@@ -377,7 +377,7 @@ describe('Plan screen — apply template', () => {
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
 
-    const btn = await screen.findByRole('button', { name: /Apply Template/i });
+    const btn = await screen.findByRole('button', { name: /Apply Budget Plan/i });
     await waitFor(() => expect(btn).not.toBeDisabled());
     fireEvent.click(btn);
 
@@ -399,7 +399,7 @@ describe('Plan screen — apply template', () => {
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
 
-    const btn = await screen.findByRole('button', { name: /Apply Template/i });
+    const btn = await screen.findByRole('button', { name: /Apply Budget Plan/i });
     await waitFor(() => expect(btn).not.toBeDisabled());
     fireEvent.click(btn);
 
@@ -411,7 +411,7 @@ describe('Plan screen — apply template', () => {
     const { default: Plan } = await import('../../src/screens/Plan');
     render(<Plan />);
 
-    const btn = await screen.findByRole('button', { name: /Apply Template/i });
+    const btn = await screen.findByRole('button', { name: /Apply Budget Plan/i });
     await waitFor(() => expect(btn).not.toBeDisabled());
     fireEvent.click(btn);
 

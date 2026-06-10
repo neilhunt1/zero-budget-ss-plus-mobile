@@ -84,7 +84,7 @@ function makeRow(tx: SeedTx): (string | number | boolean)[] {
   return COLS.map((col) => {
     const val = tx[col];
     if (val === undefined || val === null) return '';
-    if (typeof val === 'boolean') return val ? 'TRUE' : 'FALSE';
+    if (typeof val === 'boolean' || typeof val === 'number') return val;
     return val;
   });
 }
