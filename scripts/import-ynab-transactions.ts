@@ -601,51 +601,92 @@ function loadEnv(): { sheetId: string; authConfig: AuthConfig } {
 // ─── Sheet operations ─────────────────────────────────────────────────────────
 
 /**
- * Wipe all rows with date <= cutoverDate using a read-filter-rewrite strategy:
- * read all rows, drop pre-cutover rows in memory, clear the sheet, write back
- * survivors. Always 3 API calls regardless of row count.
+ * Wipe all rows with date <= cutoverDate.
  *
- * Rows after cutoverDate are always kept (BTS live-sync data).
+ * Memory-efficient: reads only the date column first to find survivors,
+ * then reads full rows only for survivors (typically a handful of recent
+ * BTS rows). Avoids loading all 26 columns × 26k rows into memory.
+ *
+ * Fast path: if cutoverDate >= today there can be no post-cutover rows
+ * (BTS only imports cleared past transactions), so we skip the read entirely.
  */
 async function wipeCutoverWindow(
   sheets: sheets_v4.Sheets,
   sheetId: string,
   cutoverDate: string,
 ): Promise<void> {
-  const dateColIndex = TRANSACTIONS_COLUMNS.indexOf('date');
+  const dateColIndex = TRANSACTIONS_COLUMNS.indexOf('date'); // 0-based column index
+  // Convert to sheet column letter (A=0, B=1, …, H=7, …)
+  const dateColLetter = String.fromCharCode('A'.charCodeAt(0) + dateColIndex);
 
-  // 1. Read all data rows
-  const res = await sheets.spreadsheets.values.get({
+  // Fast path: cutoverDate is today or in the future → no BTS rows can exist
+  // after it, so there is nothing to preserve. Skip the read entirely.
+  const today = new Date().toISOString().slice(0, 10);
+  if (cutoverDate >= today) {
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: sheetId,
+      range: 'Transactions!A2:Z',
+    });
+    log(`Transactions: wiped all existing rows (cutoverDate=${cutoverDate} ≥ today, no post-cutover rows possible)`);
+    return;
+  }
+
+  // Read only the date column — much smaller response than all 26 columns.
+  const dateRes = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: 'Transactions!A2:Z',
+    range: `Transactions!${dateColLetter}2:${dateColLetter}`,
   });
-  const allRows = res.data.values ?? [];
-  if (allRows.length === 0) {
+  const dateCells = dateRes.data.values ?? [];
+  if (dateCells.length === 0) {
     log('Transactions: sheet is empty, nothing to wipe');
     return;
   }
 
-  // 2. Keep only rows strictly after cutoverDate — everything on or before is
-  //    wiped so the YNAB import is the clean source of truth for that window.
-  //    After import, live_sync_from_date in Config tells BTS sync to skip
-  //    rows before the cutover so they don't re-appear.
-  const keptRows = allRows.filter((row) => {
-    const date = (row[dateColIndex] ?? '').trim();
-    return !date || date > cutoverDate;
-  });
+  // Identify 0-based indices (relative to row 2) that survive.
+  const survivorIndices: number[] = [];
+  for (let i = 0; i < dateCells.length; i++) {
+    const date = (dateCells[i]?.[0] ?? '').trim();
+    if (!date || date > cutoverDate) survivorIndices.push(i);
+  }
 
-  const removedCount = allRows.length - keptRows.length;
+  const removedCount = dateCells.length - survivorIndices.length;
   if (removedCount === 0) {
     log(`Transactions: nothing to wipe on or before ${cutoverDate}`);
     return;
   }
 
-  // 3. Clear and rewrite — 2 API calls total
+  // No survivors — just clear, no need to read full rows.
+  if (survivorIndices.length === 0) {
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: sheetId,
+      range: 'Transactions!A2:Z',
+    });
+    log(`Transactions: wiped ${removedCount} row(s) on or before ${cutoverDate}, no post-cutover rows to preserve`);
+    return;
+  }
+
+  // There are post-cutover survivors. Read from the first survivor row to the
+  // end of the sheet — survivors are always at the tail (BTS appends newest).
+  const firstSurvivorOffset = survivorIndices[0]; // 0-based from data row 2
+  const firstSurvivorSheetRow = 2 + firstSurvivorOffset;
+  const tailRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `Transactions!A${firstSurvivorSheetRow}:Z`,
+  });
+  const tailRows = tailRes.data.values ?? [];
+
+  // Filter tail to confirmed survivors (some rows in the tail might still be
+  // pre-cutover if dates aren't strictly monotone).
+  const survivorSet = new Set(survivorIndices);
+  const keptRows = tailRows.filter((_, offsetInTail) =>
+    survivorSet.has(firstSurvivorOffset + offsetInTail)
+  );
+
+  // Clear and write back only survivors.
   await sheets.spreadsheets.values.clear({
     spreadsheetId: sheetId,
     range: 'Transactions!A2:Z',
   });
-
   if (keptRows.length > 0) {
     await sheets.spreadsheets.values.update({
       spreadsheetId: sheetId,
@@ -654,7 +695,6 @@ async function wipeCutoverWindow(
       requestBody: { values: keptRows },
     });
   }
-
   log(`Transactions: wiped ${removedCount} row(s) on or before ${cutoverDate}, kept ${keptRows.length} post-cutover`);
 }
 
@@ -729,16 +769,25 @@ async function main(): Promise<void> {
   log(`Split groups detected: ${splitGroupsFound}`);
   log(`Transactions: ${rowsToInsert.length} rows to write`);
 
-  // Write all rows in one shot
+  // Write rows in chunks using values.update (PUT), not values.append with
+  // INSERT_ROWS. INSERT_ROWS physically creates new grid rows on top of the
+  // ~27k rows already allocated from previous imports, which doubles the cell
+  // count and hits the 10M-cell workbook limit. values.update writes into
+  // existing rows and auto-extends the grid only as needed — no cell explosion.
+  // 500 rows × 26 cols per chunk is well within the 10 MB API payload limit.
+  const WRITE_CHUNK_SIZE = 500;
   if (rowsToInsert.length > 0) {
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: sheetId,
-      range: 'Transactions!A2',
-      valueInputOption: 'RAW',
-      insertDataOption: 'INSERT_ROWS',
-      requestBody: { values: rowsToInsert },
-    });
-    log(`Transactions: wrote ${rowsToInsert.length} row(s)`);
+    for (let start = 0; start < rowsToInsert.length; start += WRITE_CHUNK_SIZE) {
+      const chunk = rowsToInsert.slice(start, start + WRITE_CHUNK_SIZE);
+      const startRow = 2 + start; // row 1 is the header
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: sheetId,
+        range: `Transactions!A${startRow}`,
+        valueInputOption: 'RAW',
+        requestBody: { values: chunk },
+      });
+    }
+    log(`Transactions: wrote ${rowsToInsert.length} row(s) in ${Math.ceil(rowsToInsert.length / WRITE_CHUNK_SIZE)} chunk(s)`);
   }
 
   // Write live_sync_from_date to Config tab
