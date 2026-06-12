@@ -1,15 +1,15 @@
 /**
  * import-ynab-transactions.ts
  *
- * One-shot script to import YNAB transaction history into the Transactions tab.
- * Purely additive — never deletes existing transactions. Safe to run multiple times.
+ * Full-wipe import of YNAB transaction history into the Transactions tab.
  *
  * What it does:
  *   1. Reads a local YNAB transaction CSV export (--file flag)
  *   2. Filters to transactions on or before --cutover-date
- *   3. Detects split groups and synthesises parent rows
- *   4. Deduplicates against existing sheet transactions (3 tiers)
- *   5. Appends new rows and marks probable duplicates
+ *   3. Clears ALL rows on or before cutover date from the Transactions tab
+ *   4. Detects split groups and synthesises parent rows
+ *   5. Writes all YNAB rows to the sheet
+ *   6. Writes live_sync_from_date to Config (tells BTS sync where to start)
  *
  * Usage:
  *   npm run import:ynab:register:dev
@@ -20,15 +20,16 @@
  *   --file          data/ynab/register.csv  (relative to project root)
  *   --cutover-date  today (YYYY-MM-DD)
  *
- * Idempotency contract:
- *   - Re-running with the same CSV produces no new rows (tier-1 exact dedup)
- *   - Never deletes or overwrites existing transactions of any source
+ * Idempotency: always a full wipe-and-rewrite of the cutover window, so
+ * re-running with the same CSV produces the same result with no duplicates.
  */
 
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { google, sheets_v4 } from 'googleapis';
+import { upsertConfigValue } from './config-tab';
+import { nextDay } from './sync-from-ynab';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,16 +49,6 @@ export interface YnabCsvRow {
   inflow: number;
   cleared: string;
 }
-
-export interface ExistingTransactionSummary {
-  externalId: string;
-  date: string;
-  account: string;
-  outflow: number;
-  inflow: number;
-}
-
-export type DedupAction = 'skip' | 'probable_duplicate' | 'insert';
 
 type AuthConfig =
   | { kind: 'keyFile'; keyPath: string }
@@ -108,6 +99,18 @@ export function mapClearedStatus(cleared: string): 'cleared' | 'pending' {
 }
 
 /**
+ * Derive the reviewed flag from the YNAB Cleared column.
+ * YNAB does not export an approval/reviewed field, so we use Cleared as
+ * the best available proxy: Cleared/Reconciled → reviewed, Uncleared → not.
+ * This means auto-imported-but-unapproved cleared transactions will be marked
+ * reviewed, which is an acceptable trade-off vs flooding triage with all history.
+ */
+export function derivedReviewed(cleared: string): boolean {
+  const v = cleared.trim().toLowerCase();
+  return v === 'cleared' || v === 'reconciled';
+}
+
+/**
  * Strip all non-ASCII characters from a string.
  * Used so emoji encoding artifacts in YNAB exports don't break category matching.
  */
@@ -138,21 +141,6 @@ export function shortHash(...parts: string[]): string {
 }
 
 /**
- * Generate a stable external_id for a YNAB CSV row.
- * Incorporates all fields that distinguish one row from another.
- */
-export function generateExternalId(
-  account: string,
-  date: string,
-  payee: string,
-  rawOutflow: string,
-  rawInflow: string,
-  memo: string,
-): string {
-  return `YNAB-${shortHash(account, date, payee, rawOutflow, rawInflow, memo)}`;
-}
-
-/**
  * Extract trailing 4-digit sequence from an account name.
  * "Chase Checking ...1234" → "1234", "Savings" → null.
  * Used for fuzzy account matching between YNAB and BTS naming conventions.
@@ -171,37 +159,6 @@ export function accountsMatch(a: string, b: string): boolean {
   const a4 = extractLast4(a);
   const b4 = extractLast4(b);
   return a4 !== null && b4 !== null && a4 === b4;
-}
-
-/**
- * Apply three-tier deduplication logic for a single incoming transaction.
- *
- * Tier 1 — exact external_id match → 'skip'
- * Tier 2 — same date + matching account + same amounts → 'probable_duplicate'
- * Tier 3 — no match → 'insert'
- */
-export function checkDedup(
-  newExternalId: string,
-  newDate: string,
-  newAccount: string,
-  newOutflow: number,
-  newInflow: number,
-  existing: ExistingTransactionSummary[],
-): DedupAction {
-  for (const ex of existing) {
-    if (ex.externalId === newExternalId) return 'skip';
-  }
-  for (const ex of existing) {
-    if (
-      ex.date === newDate &&
-      accountsMatch(ex.account, newAccount) &&
-      Math.abs(ex.outflow - newOutflow) < 0.005 &&
-      Math.abs(ex.inflow - newInflow) < 0.005
-    ) {
-      return 'probable_duplicate';
-    }
-  }
-  return 'insert';
 }
 
 /**
@@ -247,26 +204,23 @@ export function groupRows(
 
 /**
  * Build the synthetic parent transaction row for a split group.
- * Returns the parent row (string[]) plus the shared parentId/splitGroupId.
+ * Returns the parent row plus the shared parentId/splitGroupId.
  */
 export function buildSplitParentRow(
   group: YnabCsvRow[],
   importedAt: string,
-): { parentRow: string[]; parentId: string; splitGroupId: string } {
+): { parentRow: (string | number | boolean)[]; parentId: string; splitGroupId: string } {
   const first = group[0];
 
   const totalOutflow = group.reduce((s, r) => s + r.outflow, 0);
   const totalInflow = group.reduce((s, r) => s + r.inflow, 0);
 
-  const childExternalIds = group.map((r) =>
-    generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.memo),
-  );
-  const groupHash = shortHash(...childExternalIds);
   const accountSafe = first.account.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  const groupHash = shortHash(first.date, first.account, first.payee, String(totalOutflow), String(totalInflow));
   const parentId = `YNAB-SPLIT-${first.date}-${accountSafe}-${groupHash}`;
   const splitGroupId = parentId;
 
-  const row = new Array<string>(TRANSACTIONS_COLUMNS.length).fill('');
+  const row = new Array<string | number | boolean>(TRANSACTIONS_COLUMNS.length).fill('');
   const col = (name: string) => TRANSACTIONS_COLUMNS.indexOf(name);
 
   row[col('transaction_id')] = parentId;
@@ -281,13 +235,13 @@ export function buildSplitParentRow(
   row[col('category')] = '';
   row[col('category_group')] = '';
   row[col('category_subgroup')] = '';
-  row[col('outflow')] = String(totalOutflow);
-  row[col('inflow')] = String(totalInflow);
+  row[col('outflow')] = totalOutflow;
+  row[col('inflow')] = totalInflow;
   row[col('account')] = first.account;
   row[col('memo')] = '';
   row[col('flag')] = first.flag;
   row[col('transaction_type')] = detectYnabTransactionType(first);
-  row[col('reviewed')] = 'TRUE';
+  row[col('reviewed')] = derivedReviewed(first.cleared);
 
   return { parentRow: row, parentId, splitGroupId };
 }
@@ -303,13 +257,13 @@ export function buildSplitChildRows(
   splitGroupId: string,
   importedAt: string,
   categoryIndex: Map<string, string>,
-): string[][] {
-  return group.map((r) => {
-    const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.memo);
+): (string | number | boolean)[][] {
+  return group.map((r, index) => {
+    const externalId = `${parentId}-child-${index}`;
     const canonicalCategory = resolveCategory(r.category, categoryIndex);
     const cleanMemo = stripSplitIndicator(r.memo);
 
-    const row = new Array<string>(TRANSACTIONS_COLUMNS.length).fill('');
+    const row = new Array<string | number | boolean>(TRANSACTIONS_COLUMNS.length).fill('');
     const col = (name: string) => TRANSACTIONS_COLUMNS.indexOf(name);
 
     row[col('transaction_id')] = externalId;
@@ -324,13 +278,13 @@ export function buildSplitChildRows(
     row[col('category')] = canonicalCategory;
     row[col('category_group')] = '';
     row[col('category_subgroup')] = '';
-    row[col('outflow')] = String(r.outflow);
-    row[col('inflow')] = String(r.inflow);
+    row[col('outflow')] = r.outflow;
+    row[col('inflow')] = r.inflow;
     row[col('account')] = r.account;
     row[col('memo')] = cleanMemo;
     row[col('flag')] = r.flag;
     row[col('transaction_type')] = detectYnabTransactionType(r);
-    row[col('reviewed')] = 'TRUE';
+    row[col('reviewed')] = derivedReviewed(r.cleared);
 
     return row;
   });
@@ -343,18 +297,19 @@ export function buildRegularTransactionRow(
   r: YnabCsvRow,
   importedAt: string,
   categoryIndex: Map<string, string>,
-): string[] {
-  const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.memo);
+  rowIndex: number,
+): (string | number | boolean)[] {
+  const txId = `YNAB-${shortHash(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, String(rowIndex))}`;
   const canonicalCategory = resolveCategory(r.category, categoryIndex);
 
-  const row = new Array<string>(TRANSACTIONS_COLUMNS.length).fill('');
+  const row = new Array<string | number | boolean>(TRANSACTIONS_COLUMNS.length).fill('');
   const col = (name: string) => TRANSACTIONS_COLUMNS.indexOf(name);
 
-  row[col('transaction_id')] = externalId;
+  row[col('transaction_id')] = txId;
   row[col('parent_id')] = '';
   row[col('split_group_id')] = '';
   row[col('source')] = 'ynab_import';
-  row[col('external_id')] = externalId;
+  row[col('external_id')] = txId;
   row[col('imported_at')] = importedAt;
   row[col('status')] = mapClearedStatus(r.cleared);
   row[col('date')] = r.date;
@@ -362,13 +317,13 @@ export function buildRegularTransactionRow(
   row[col('category')] = canonicalCategory;
   row[col('category_group')] = '';
   row[col('category_subgroup')] = '';
-  row[col('outflow')] = String(r.outflow);
-  row[col('inflow')] = String(r.inflow);
+  row[col('outflow')] = r.outflow;
+  row[col('inflow')] = r.inflow;
   row[col('account')] = r.account;
   row[col('memo')] = r.memo;
   row[col('flag')] = r.flag;
   row[col('transaction_type')] = detectYnabTransactionType(r);
-  row[col('reviewed')] = 'TRUE';
+  row[col('reviewed')] = derivedReviewed(r.cleared);
 
   return row;
 }
@@ -505,13 +460,15 @@ export function parseCsv(csvContent: string): YnabCsvRow[] {
 
     const rawOutflow = fields[outflowCol]?.trim() ?? '0';
     const rawInflow = fields[inflowCol]?.trim() ?? '0';
+    const account = fields[accountCol]?.trim() ?? '';
+    const payee = payeeCol >= 0 ? (fields[payeeCol]?.trim() ?? '') : '';
 
     rows.push({
-      account: fields[accountCol]?.trim() ?? '',
+      account,
       flag: flagCol >= 0 ? (fields[flagCol]?.trim() ?? '') : '',
       rawDate,
       date,
-      payee: payeeCol >= 0 ? (fields[payeeCol]?.trim() ?? '') : '',
+      payee,
       categoryGroupCategory: cgCatCol >= 0 ? (fields[cgCatCol]?.trim() ?? '') : '',
       categoryGroup: cgCol >= 0 ? (fields[cgCol]?.trim() ?? '') : '',
       category: catCol >= 0 ? (fields[catCol]?.trim() ?? '') : '',
@@ -644,81 +601,101 @@ function loadEnv(): { sheetId: string; authConfig: AuthConfig } {
 // ─── Sheet operations ─────────────────────────────────────────────────────────
 
 /**
- * Read all existing transactions from the sheet for dedup purposes.
- * Only reads the columns needed: external_id, date, account, outflow, inflow, status.
+ * Wipe all rows with date <= cutoverDate.
+ *
+ * Memory-efficient: reads only the date column first to find survivors,
+ * then reads full rows only for survivors (typically a handful of recent
+ * BTS rows). Avoids loading all 26 columns × 26k rows into memory.
+ *
+ * Fast path: if cutoverDate >= today there can be no post-cutover rows
+ * (BTS only imports cleared past transactions), so we skip the read entirely.
  */
-async function readExistingTransactions(
+async function wipeCutoverWindow(
   sheets: sheets_v4.Sheets,
   sheetId: string,
-): Promise<ExistingTransactionSummary[]> {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: 'Transactions!A2:Z',
-  });
-  const rows = res.data.values ?? [];
-
-  const col = (name: string) => TRANSACTIONS_COLUMNS.indexOf(name);
-  const extIdCol = col('external_id');
-  const dateCol = col('date');
-  const accountCol = col('account');
-  const outflowCol = col('outflow');
-  const inflowCol = col('inflow');
-
-  return rows
-    .filter((row) => (row[extIdCol] ?? '').trim() !== '')
-    .map((row) => ({
-      externalId: row[extIdCol] ?? '',
-      date: row[dateCol] ?? '',
-      account: row[accountCol] ?? '',
-      outflow: parseFloat(row[outflowCol] ?? '0') || 0,
-      inflow: parseFloat(row[inflowCol] ?? '0') || 0,
-    }));
-}
-
-/**
- * Update status to 'probable_duplicate' for rows identified in tier-2 dedup.
- * Reads all rows to find matching external_ids and updates their status column.
- */
-async function markProbableDuplicates(
-  sheets: sheets_v4.Sheets,
-  sheetId: string,
-  externalIds: string[],
+  cutoverDate: string,
 ): Promise<void> {
-  if (externalIds.length === 0) return;
+  const dateColIndex = TRANSACTIONS_COLUMNS.indexOf('date'); // 0-based column index
+  // Convert to sheet column letter (A=0, B=1, …, H=7, …)
+  const dateColLetter = String.fromCharCode('A'.charCodeAt(0) + dateColIndex);
 
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: 'Transactions!A2:Z',
-  });
-  const rows = res.data.values ?? [];
-
-  const extIdCol = TRANSACTIONS_COLUMNS.indexOf('external_id');
-  const statusCol = TRANSACTIONS_COLUMNS.indexOf('status');
-  const statusColLetter = String.fromCharCode(65 + statusCol);
-
-  const idSet = new Set(externalIds);
-  const updates: sheets_v4.Schema$ValueRange[] = [];
-
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    if (idSet.has(row[extIdCol] ?? '')) {
-      const sheetRow = i + 2; // 1-based, offset by header
-      updates.push({
-        range: `Transactions!${statusColLetter}${sheetRow}`,
-        values: [['probable_duplicate']],
-      });
-    }
+  // Fast path: cutoverDate is today or in the future → no BTS rows can exist
+  // after it, so there is nothing to preserve. Skip the read entirely.
+  const today = new Date().toISOString().slice(0, 10);
+  if (cutoverDate >= today) {
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: sheetId,
+      range: 'Transactions!A2:Z',
+    });
+    log(`Transactions: wiped all existing rows (cutoverDate=${cutoverDate} ≥ today, no post-cutover rows possible)`);
+    return;
   }
 
-  if (updates.length > 0) {
-    await sheets.spreadsheets.values.batchUpdate({
+  // Read only the date column — much smaller response than all 26 columns.
+  const dateRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `Transactions!${dateColLetter}2:${dateColLetter}`,
+  });
+  const dateCells = dateRes.data.values ?? [];
+  if (dateCells.length === 0) {
+    log('Transactions: sheet is empty, nothing to wipe');
+    return;
+  }
+
+  // Identify 0-based indices (relative to row 2) that survive.
+  const survivorIndices: number[] = [];
+  for (let i = 0; i < dateCells.length; i++) {
+    const date = (dateCells[i]?.[0] ?? '').trim();
+    if (!date || date > cutoverDate) survivorIndices.push(i);
+  }
+
+  const removedCount = dateCells.length - survivorIndices.length;
+  if (removedCount === 0) {
+    log(`Transactions: nothing to wipe on or before ${cutoverDate}`);
+    return;
+  }
+
+  // No survivors — just clear, no need to read full rows.
+  if (survivorIndices.length === 0) {
+    await sheets.spreadsheets.values.clear({
       spreadsheetId: sheetId,
-      requestBody: {
-        valueInputOption: 'RAW',
-        data: updates,
-      },
+      range: 'Transactions!A2:Z',
+    });
+    log(`Transactions: wiped ${removedCount} row(s) on or before ${cutoverDate}, no post-cutover rows to preserve`);
+    return;
+  }
+
+  // There are post-cutover survivors. Read from the first survivor row to the
+  // end of the sheet — survivors are always at the tail (BTS appends newest).
+  const firstSurvivorOffset = survivorIndices[0]; // 0-based from data row 2
+  const firstSurvivorSheetRow = 2 + firstSurvivorOffset;
+  const tailRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `Transactions!A${firstSurvivorSheetRow}:Z`,
+  });
+  const tailRows = tailRes.data.values ?? [];
+
+  // Filter tail to confirmed survivors (some rows in the tail might still be
+  // pre-cutover if dates aren't strictly monotone).
+  const survivorSet = new Set(survivorIndices);
+  const keptRows = tailRows.filter((_, offsetInTail) =>
+    survivorSet.has(firstSurvivorOffset + offsetInTail)
+  );
+
+  // Clear and write back only survivors.
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId: sheetId,
+    range: 'Transactions!A2:Z',
+  });
+  if (keptRows.length > 0) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: 'Transactions!A2',
+      valueInputOption: 'RAW',
+      requestBody: { values: keptRows },
     });
   }
+  log(`Transactions: wiped ${removedCount} row(s) on or before ${cutoverDate}, kept ${keptRows.length} post-cutover`);
 }
 
 // ─── Logging & error helpers ──────────────────────────────────────────────────
@@ -754,122 +731,68 @@ async function main(): Promise<void> {
   const allRows = parseCsv(csvContent);
   log(`CSV: parsed ${allRows.length} rows from ${path.basename(filePath)}`);
 
-  // Apply cutover date filter
+  // Apply cutover date filter — only import rows on or before the cutover date
   const cutoverRows = allRows.filter((r) => r.date <= cutoverDate);
   const filtered = allRows.length - cutoverRows.length;
   if (filtered > 0) log(`CSV: filtered out ${filtered} rows after cutover date ${cutoverDate}`);
   log(`CSV: ${cutoverRows.length} rows within cutover date`);
 
+  // Wipe all rows on or before cutover date, then write fresh YNAB data.
+  // live_sync_from_date written below tells BTS sync to start after this date.
+  log(`Wiping all rows on or before ${cutoverDate} for clean re-import`);
+  await wipeCutoverWindow(sheets, sheetId, cutoverDate);
+
   // Load categories from the sheet
   const categoryIndex = await loadCategoryIndex(sheets, sheetId);
   log(`Categories: indexed ${categoryIndex.size} entries from sheet`);
 
-  // Read existing transactions for dedup
-  const existing = await readExistingTransactions(sheets, sheetId);
-  log(`Dedup: loaded ${existing.length} existing transaction(s) from sheet`);
-
   const importedAt = new Date().toISOString();
 
-  // Process groups
+  // Build rows: detect split groups, synthesise parent rows
   const groups = groupRows(cutoverRows);
-
-  const rowsToInsert: string[][] = [];
-  const probableDupExternalIds: string[] = [];
-  let skipped = 0;
-  let probableDups = 0;
+  const rowsToInsert: (string | number | boolean)[][] = [];
   let splitGroupsFound = 0;
+  let regularRowIndex = 0;
 
   for (const group of groups) {
     if (group.isSplit) {
       splitGroupsFound++;
-
-      // Build parent + children
       const { parentRow, parentId, splitGroupId } = buildSplitParentRow(group.rows, importedAt);
       const childRows = buildSplitChildRows(group.rows, parentId, splitGroupId, importedAt, categoryIndex);
-
-      const parentExtId = parentId;
-      const parentOutflow = group.rows.reduce((s, r) => s + r.outflow, 0);
-      const parentInflow = group.rows.reduce((s, r) => s + r.inflow, 0);
-
-      // Dedup on parent
-      const parentDedup = checkDedup(
-        parentExtId,
-        group.rows[0].date,
-        group.rows[0].account,
-        parentOutflow,
-        parentInflow,
-        existing,
-      );
-
-      if (parentDedup === 'skip') {
-        skipped++; // whole split group already imported
-        continue;
-      }
-
-      if (parentDedup === 'probable_duplicate') {
-        // Still insert (so user can review in triage), but mark status
-        const parentIdx = TRANSACTIONS_COLUMNS.indexOf('status');
-        parentRow[parentIdx] = 'probable_duplicate';
-        probableDupExternalIds.push(parentExtId);
-        probableDups++;
-      }
-
-      rowsToInsert.push(parentRow);
-
-      for (const childRow of childRows) {
-        const childExtId = childRow[TRANSACTIONS_COLUMNS.indexOf('external_id')];
-        const childDate = childRow[TRANSACTIONS_COLUMNS.indexOf('date')];
-        const childAccount = childRow[TRANSACTIONS_COLUMNS.indexOf('account')];
-        const childOutflow = parseFloat(childRow[TRANSACTIONS_COLUMNS.indexOf('outflow')]) || 0;
-        const childInflow = parseFloat(childRow[TRANSACTIONS_COLUMNS.indexOf('inflow')]) || 0;
-
-        const childDedup = checkDedup(childExtId, childDate, childAccount, childOutflow, childInflow, existing);
-        if (childDedup === 'skip') continue;
-        if (childDedup === 'probable_duplicate') {
-          const statusIdx = TRANSACTIONS_COLUMNS.indexOf('status');
-          childRow[statusIdx] = 'probable_duplicate';
-          probableDupExternalIds.push(childExtId);
-          probableDups++;
-        }
-        rowsToInsert.push(childRow);
-      }
+      rowsToInsert.push(parentRow, ...childRows);
     } else {
-      const r = group.rows[0];
-      const externalId = generateExternalId(r.account, r.date, r.payee, r.rawOutflow, r.rawInflow, r.memo);
-      const dedup = checkDedup(externalId, r.date, r.account, r.outflow, r.inflow, existing);
-
-      if (dedup === 'skip') {
-        skipped++;
-        continue;
-      }
-
-      const txRow = buildRegularTransactionRow(r, importedAt, categoryIndex);
-
-      if (dedup === 'probable_duplicate') {
-        const statusIdx = TRANSACTIONS_COLUMNS.indexOf('status');
-        txRow[statusIdx] = 'probable_duplicate';
-        probableDupExternalIds.push(externalId);
-        probableDups++;
-      }
-
-      rowsToInsert.push(txRow);
+      rowsToInsert.push(buildRegularTransactionRow(group.rows[0], importedAt, categoryIndex, regularRowIndex));
+      regularRowIndex++;
     }
   }
 
   log(`Split groups detected: ${splitGroupsFound}`);
-  log(`Dedup: ${skipped} skipped (exact match), ${probableDups} probable duplicate(s), ${rowsToInsert.length} to insert`);
+  log(`Transactions: ${rowsToInsert.length} rows to write`);
 
-  // Append new rows
+  // Write rows in chunks using values.update (PUT), not values.append with
+  // INSERT_ROWS. INSERT_ROWS physically creates new grid rows on top of the
+  // ~27k rows already allocated from previous imports, which doubles the cell
+  // count and hits the 10M-cell workbook limit. values.update writes into
+  // existing rows and auto-extends the grid only as needed — no cell explosion.
+  // 500 rows × 26 cols per chunk is well within the 10 MB API payload limit.
+  const WRITE_CHUNK_SIZE = 500;
   if (rowsToInsert.length > 0) {
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: sheetId,
-      range: 'Transactions!A2',
-      valueInputOption: 'RAW',
-      insertDataOption: 'INSERT_ROWS',
-      requestBody: { values: rowsToInsert },
-    });
-    log(`Transactions: appended ${rowsToInsert.length} row(s)`);
+    for (let start = 0; start < rowsToInsert.length; start += WRITE_CHUNK_SIZE) {
+      const chunk = rowsToInsert.slice(start, start + WRITE_CHUNK_SIZE);
+      const startRow = 2 + start; // row 1 is the header
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: sheetId,
+        range: `Transactions!A${startRow}`,
+        valueInputOption: 'RAW',
+        requestBody: { values: chunk },
+      });
+    }
+    log(`Transactions: wrote ${rowsToInsert.length} row(s) in ${Math.ceil(rowsToInsert.length / WRITE_CHUNK_SIZE)} chunk(s)`);
   }
+
+  // Write live_sync_from_date to Config tab
+  const liveSyncFromDate = nextDay(cutoverDate);
+  await upsertConfigValue(sheets, sheetId, 'live_sync_from_date', liveSyncFromDate);
 
   console.log('\n── Import complete ──────────────────────────────────────────\n');
 }

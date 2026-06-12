@@ -59,14 +59,46 @@ describe('aggregateSpending', () => {
     expect(result[0].group).toBe('Food');
   });
 
-  it('excludes inflow-only transactions', () => {
+  it('excludes income transactions (transaction_type = income)', () => {
     const txns = [
-      tx({ category_group: 'Income', inflow: 5000, outflow: 0 }),
+      tx({ category_group: 'Income', inflow: 5000, outflow: 0, transaction_type: 'income' }),
       tx({ category_group: 'Food', outflow: 100 }),
     ];
     const result = aggregateSpending(txns, null);
     expect(result).toHaveLength(1);
     expect(result[0].group).toBe('Food');
+  });
+
+  it('excludes credit_payment transactions', () => {
+    const txns = [
+      tx({ category_group: 'Food', outflow: 100 }),
+      tx({ outflow: 500, transaction_type: 'credit_payment' }),
+    ];
+    const result = aggregateSpending(txns, null);
+    expect(result).toHaveLength(1);
+    expect(result[0].group).toBe('Food');
+  });
+
+  it('nets inflow (refund/credit) against outflow within the same category', () => {
+    // 2000 + 3000 outflow, 5600 refund → net -600 (category shows as negative spend)
+    const txns = [
+      tx({ category_group: 'Housing', category: 'Escrow', outflow: 2000, inflow: 0 }),
+      tx({ category_group: 'Housing', category: 'Escrow', outflow: 3000, inflow: 0 }),
+      tx({ category_group: 'Housing', category: 'Escrow', outflow: 0, inflow: 5600 }),
+    ];
+    const result = aggregateSpending(txns, null);
+    expect(result).toHaveLength(1);
+    expect(result[0].total).toBeCloseTo(-600); // net negative = net credit month
+  });
+
+  it('shows category with positive net after inflow netting', () => {
+    const txns = [
+      tx({ category_group: 'Housing', category: 'Escrow', outflow: 6000, inflow: 0 }),
+      tx({ category_group: 'Housing', category: 'Escrow', outflow: 0, inflow: 1000 }), // partial refund
+    ];
+    const result = aggregateSpending(txns, null);
+    expect(result).toHaveLength(1);
+    expect(result[0].total).toBeCloseTo(5000); // 6000 - 1000
   });
 
   it('filters by selectedCategories when provided', () => {

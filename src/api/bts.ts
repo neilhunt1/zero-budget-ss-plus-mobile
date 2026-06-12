@@ -4,6 +4,7 @@ import { appendTransactions, updateTransactionFields } from './transactions';
 
 const BTS_TAB = 'Transactions (BTS)';
 const TRANSACTIONS_EXT_ID_RANGE = 'Transactions!E2:G'; // external_id(E), status(G)
+const CONFIG_TAB = 'Meta';
 
 // ─── Pure helpers (exported for unit tests) ───────────────────────────────────
 
@@ -73,6 +74,36 @@ export function normalizeBtsRow(row: BtsRow): Omit<Transaction, '_rowIndex'> {
 
 // ─── Main normalization function ──────────────────────────────────────────────
 
+// ─── Main normalization function ──────────────────────────────────────────────
+
+/**
+ * Read live_sync_from_date from the Config tab.
+ * Returns null if the Config tab doesn't exist or the key isn't set,
+ * meaning all BTS transactions are eligible for import.
+ */
+async function readLiveSyncFromDate(client: SheetsClient): Promise<string | null> {
+  // "Unable to parse range" means the Config tab doesn't exist yet (no import
+  // has run against this sheet). Treat as null — no cutover set, BTS owns all dates.
+  // All other errors propagate: the caller will bail rather than flood the sheet.
+  try {
+    const res = await client.getValues(`${CONFIG_TAB}!A2:B`);
+    for (const row of res.values ?? []) {
+      if (row[0]?.trim() === 'live_sync_from_date') {
+        const val = row[1]?.trim();
+        return val || null;
+      }
+    }
+    return null;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes('Unable to parse range') || msg.includes('notFound')) {
+      // Config tab doesn't exist — no import has run, no cutover boundary
+      return null;
+    }
+    throw e; // real error — propagate so caller skips BTS normalization
+  }
+}
+
 /**
  * Read Transactions (BTS), normalize each row, and write new/updated rows to
  * the canonical Transactions tab.
@@ -83,9 +114,24 @@ export function normalizeBtsRow(row: BtsRow): Omit<Transaction, '_rowIndex'> {
 export async function normalizeBtsTransactions(
   client: SheetsClient
 ): Promise<{ inserted: number; updated: number }> {
+  // Read live_sync_from_date from Config — BTS rows before this date are skipped.
+  // This is the cutover boundary written by the import-ynab-transactions script.
+  // If the Config tab is unreadable, we bail rather than inserting everything —
+  // a null cutover would flood the sheet with pre-cutover BTS history.
+  let liveSyncFromDate: string | null;
+  try {
+    liveSyncFromDate = await readLiveSyncFromDate(client);
+  } catch (e) {
+    console.warn('[BTS] Could not read live_sync_from_date from Config tab — skipping BTS normalization to avoid inserting pre-cutover rows:', e);
+    return { inserted: 0, updated: 0 };
+  }
+  if (liveSyncFromDate) {
+    console.log(`[BTS] live_sync_from_date: ${liveSyncFromDate} — skipping rows before this date`);
+  } else {
+    console.log('[BTS] live_sync_from_date not set — no YNAB import has run yet, all BTS rows eligible');
+  }
+
   // Read BTS source tab (header row + data rows).
-  // If the tab doesn't exist yet, skip normalization gracefully so the rest
-  // of the sync (Transactions tab, categories, etc.) can still proceed.
   let btsRes: { values?: string[][] };
   try {
     btsRes = await client.getValues(`${BTS_TAB}!A1:Z`);
@@ -143,9 +189,20 @@ export async function normalizeBtsTransactions(
   let updated = 0;
   const toInsert: Omit<Transaction, '_rowIndex'>[] = [];
 
+  let skippedBeforeCutover = 0;
+
   for (const row of btsRows) {
     const transactionId = row[idxId]?.trim();
     if (!transactionId) continue;
+
+    // Skip rows before the live_sync_from_date cutover boundary
+    if (liveSyncFromDate) {
+      const parsedDate = parseBtsDate(row[idxDate] ?? '');
+      if (parsedDate < liveSyncFromDate) {
+        skippedBeforeCutover++;
+        continue;
+      }
+    }
 
     const isPending = row[idxPending]?.trim().toUpperCase() === 'TRUE';
     const btsRow: BtsRow = {
@@ -179,6 +236,6 @@ export async function normalizeBtsTransactions(
   await appendTransactions(client, toInsert);
   const inserted = toInsert.length;
 
-  console.log(`[BTS] done — inserted: ${inserted}, updated: ${updated}, skipped: ${btsRows.length - inserted - updated}`);
+  console.log(`[BTS] done — inserted: ${inserted}, updated: ${updated}, skipped before cutover: ${skippedBeforeCutover}, skipped (already exists): ${btsRows.length - inserted - updated - skippedBeforeCutover}`);
   return { inserted, updated };
 }

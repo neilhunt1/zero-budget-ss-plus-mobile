@@ -8,14 +8,13 @@
  * What gets copied:
  *   - Transactions tab (all rows)
  *   - Budget tab (rows 2+ — row 1 contains a formula managed by setup:dev)
- *   - Templates tab (all rows)
+ *   - Split Rules tab (all rows)
  *   - Balance History (BTS) tab (all rows)
- *   - YNAB_Plan_Import tab (all rows, if populated)
+ *   - Transactions (BTS) tab (all rows)
  *
  * What does NOT get copied:
  *   - BankToSheets_Raw (BTS-owned)
  *   - Reflect (formula-only charts/summaries)
- *   - YNAB_Transactions_Import (reserved, empty)
  *
  * Usage:
  *   npm run sync-from-prod-to-dev
@@ -57,16 +56,14 @@ export interface TabSpec {
 const TABS_TO_COPY = [
   'Transactions',
   'Budget',
-  'Templates',
+  'Split Rules',
   'Balance History (BTS)',
   'Transactions (BTS)',
-  'YNAB_Plan_Import',
 ];
 
 export const TABS_TO_SKIP = new Set([
   'BankToSheets_Raw',
   'Reflect',
-  'YNAB_Transactions_Import',
 ]);
 
 // ─── Pure functions (exported for unit testing) ────────────────────────────────

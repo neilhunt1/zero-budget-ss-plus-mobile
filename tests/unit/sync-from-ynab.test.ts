@@ -165,7 +165,7 @@ describe('buildOpeningTransactions', () => {
     const accounts: AccountBalance[] = [{ account: 'Checking', balance: 4567.89 }];
     const [row] = buildOpeningTransactions(accounts, fixedNow);
     // inflow is at index 16
-    expect(row[16]).toBe('4567.89');
+    expect(row[16]).toBe(4567.89);
   });
 
   it('generates deterministic transaction_id from account name', () => {
@@ -234,8 +234,39 @@ describe('applyYnabAssignments', () => {
     const groceriesRows = result.filter(
       (r) => r[1] === 'Groceries 🛒' && r[0] === '2026-04'
     );
-    // Should be exactly one row for Apr 2026 Groceries (the new value, not old)
     expect(groceriesRows).toHaveLength(1);
-    expect(groceriesRows[0][2]).toBe('1000');
+    expect(groceriesRows[0][2]).toBe(1000);
+  });
+
+  describe('cutover mode', () => {
+    it('wipes all rows (any source) on or before cutover month', () => {
+      const existing: string[][] = [
+        ['2026-03', 'Groceries 🛒', '800', 'manual'],
+        ['2026-04', 'Rent', '2000', 'manual'],
+        ['2026-05', 'Rent', '2000', 'manual'],
+      ];
+      const result = applyYnabAssignments(existing, ynabRows, '2026-04');
+      // 2026-03 and 2026-04 manual rows wiped; 2026-05 preserved
+      expect(result.filter((r) => r[3] === 'manual')).toHaveLength(1);
+      expect(result.find((r) => r[0] === '2026-05' && r[3] === 'manual')).toBeTruthy();
+    });
+
+    it('keeps rows strictly after cutover month', () => {
+      const existing: string[][] = [
+        ['2026-05', 'Dining Out 🧑‍🍳', '300', 'manual'],
+        ['2026-06', 'Dining Out 🧑‍🍳', '350', 'template'],
+      ];
+      const result = applyYnabAssignments(existing, ynabRows, '2026-04');
+      expect(result.filter((r) => r[0] === '2026-05')).toHaveLength(1);
+      expect(result.filter((r) => r[0] === '2026-06')).toHaveLength(1);
+    });
+
+    it('without cutover month, preserves manual rows as before', () => {
+      const existing: string[][] = [
+        ['2026-04', 'Rent', '2000', 'manual'],
+      ];
+      const result = applyYnabAssignments(existing, ynabRows, null);
+      expect(result.find((r) => r[3] === 'manual')).toBeTruthy();
+    });
   });
 });

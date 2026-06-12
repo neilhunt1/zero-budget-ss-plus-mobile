@@ -71,17 +71,21 @@ export function aggregateSpending(
   categoryGroupMap?: Map<string, string>,    // category → category_group fallback
   categorySubgroupMap?: Map<string, string>, // category → category_subgroup fallback
 ): GroupSpend[] {
-  const outflows = transactions.filter(
+  // Only regular transactions contribute to spending. Transfers, income, and CC payments
+  // each have their own transaction_type and are excluded explicitly. The caller should
+  // pass split children (not split parents) so each category gets its real amount —
+  // use getTransactionsForSpending() rather than getTransactionsByDateRange().
+  const relevant = transactions.filter(
     (t) =>
-      t.transaction_type !== 'transfer' &&
-      t.outflow > 0 &&
+      t.transaction_type === 'regular' &&
       (selectedCategories === null || selectedCategories.has(t.category)),
   );
 
-  // group → subgroup → category → total
+  // group → subgroup → category → net (outflow - inflow)
+  // inflow > 0 on a regular row means a refund/credit that reduces category spend.
   const byGroup = new Map<string, Map<string, Map<string, number>>>();
 
-  for (const t of outflows) {
+  for (const t of relevant) {
     const group = t.category_group || categoryGroupMap?.get(t.category) || 'Uncategorized';
     const subgroup = t.category_subgroup || categorySubgroupMap?.get(t.category) || '';
     const cat = t.category || 'Uncategorized';
@@ -90,7 +94,7 @@ export function aggregateSpending(
     const subMap = byGroup.get(group)!;
     if (!subMap.has(subgroup)) subMap.set(subgroup, new Map());
     const catMap = subMap.get(subgroup)!;
-    catMap.set(cat, (catMap.get(cat) ?? 0) + t.outflow);
+    catMap.set(cat, (catMap.get(cat) ?? 0) + t.outflow - t.inflow);
   }
 
   return [...byGroup.entries()]

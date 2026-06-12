@@ -74,7 +74,9 @@ function parseRow(row: string[], rowIndex: number): Transaction {
 function serializeRow(tx: Omit<Transaction, '_rowIndex'>): unknown[] {
   return COLS.map((col) => {
     const val = (tx as Record<string, unknown>)[col];
-    if (typeof val === 'boolean') return val ? 'TRUE' : 'FALSE';
+    // Return booleans and numbers as native types so Sheets stores them correctly.
+    // String(boolean) or String(number) would cause the leading-apostrophe text bug.
+    if (typeof val === 'boolean' || typeof val === 'number') return val;
     return val ?? '';
   });
 }
@@ -190,7 +192,12 @@ export async function updateTransactionFields(
     const idx = COLS.indexOf(key as (typeof COLS)[number]);
     if (idx === -1) continue; // ignore unknown keys
     const letter = colIndexToLetter(idx);
-    const cellValue = typeof value === 'boolean' ? (value ? 'TRUE' : 'FALSE') : String(value ?? '');
+    // Preserve native types — boolean and number must not be stringified or
+    // Sheets will store them as text with a leading apostrophe.
+    const cellValue: unknown =
+      typeof value === 'boolean' ? value
+      : typeof value === 'number' ? value
+      : String(value ?? '');
     await client.updateValues(`Transactions!${letter}${rowIndex}`, [[cellValue]]);
   }
 }

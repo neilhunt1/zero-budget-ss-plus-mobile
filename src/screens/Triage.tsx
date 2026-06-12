@@ -25,6 +25,11 @@ function fmt(n: number): string {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 });
 }
 
+function fmtDate(iso: string): string {
+  const [y, mo, d] = iso.split('-').map(Number);
+  return new Date(y, mo - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 function txAmount(tx: Transaction): number {
   return tx.inflow > 0 ? tx.inflow : tx.outflow;
 }
@@ -58,7 +63,7 @@ function IncomeCard({
       <div className="triage-card-payee">{tx.payee || tx.description || '(unknown payee)'}</div>
       <div className="triage-card-meta">
         <span>{tx.account}</span>
-        <span>{tx.date}</span>
+        <span>{fmtDate(tx.date)}</span>
       </div>
       <button className="triage-view-in-list" onClick={onViewInList}>View in list →</button>
       <div className="triage-actions">
@@ -104,7 +109,7 @@ function TransferCard({
       <div className="triage-card-payee">{tx.payee || tx.description || '(unknown payee)'}</div>
       <div className="triage-card-meta">
         <span>{tx.account}</span>
-        <span>{tx.date}</span>
+        <span>{fmtDate(tx.date)}</span>
       </div>
       {pair && (
         <div className="triage-pair-match">Matched with {pair.account}</div>
@@ -153,7 +158,7 @@ function CcPaymentCard({
       <div className="triage-card-payee">{tx.payee || tx.description || '(unknown payee)'}</div>
       <div className="triage-card-meta">
         <span>{tx.account}</span>
-        <span>{tx.date}</span>
+        <span>{fmtDate(tx.date)}</span>
       </div>
       {pair && (
         <div className="triage-pair-match">Matched with {pair.account}</div>
@@ -212,7 +217,7 @@ function PurchaseCard({
       <div className="triage-card-payee">{tx.payee || tx.description || '(unknown payee)'}</div>
       <div className="triage-card-meta">
         <span>{tx.account}</span>
-        <span>{tx.date}</span>
+        <span>{fmtDate(tx.date)}</span>
       </div>
       <button className="triage-view-in-list" onClick={onViewInList}>View in list →</button>
 

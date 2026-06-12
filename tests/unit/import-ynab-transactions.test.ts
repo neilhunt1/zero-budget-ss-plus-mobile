@@ -3,14 +3,13 @@ import {
   parseYnabDate,
   parseYnabAmount,
   mapClearedStatus,
+  derivedReviewed,
   isSplitRow,
   stripSplitIndicator,
   normalizeForMatch,
   shortHash,
-  generateExternalId,
   extractLast4,
   accountsMatch,
-  checkDedup,
   groupRows,
   buildSplitParentRow,
   buildSplitChildRows,
@@ -20,7 +19,6 @@ import {
   parseCsv,
   detectYnabTransactionType,
   type YnabCsvRow,
-  type ExistingTransactionSummary,
 } from '../../scripts/import-ynab-transactions';
 
 // ─── parseYnabDate ────────────────────────────────────────────────────────────
@@ -106,6 +104,33 @@ describe('mapClearedStatus', () => {
   });
 });
 
+// ─── derivedReviewed ──────────────────────────────────────────────────────────
+
+describe('derivedReviewed', () => {
+  it('returns true for Cleared', () => {
+    expect(derivedReviewed('Cleared')).toBe(true);
+  });
+
+  it('returns true for Reconciled', () => {
+    expect(derivedReviewed('Reconciled')).toBe(true);
+  });
+
+  it('returns false for Uncleared', () => {
+    expect(derivedReviewed('Uncleared')).toBe(false);
+  });
+
+  it('is case-insensitive', () => {
+    expect(derivedReviewed('cleared')).toBe(true);
+    expect(derivedReviewed('RECONCILED')).toBe(true);
+    expect(derivedReviewed('uncleared')).toBe(false);
+  });
+
+  it('returns false for unknown/empty values', () => {
+    expect(derivedReviewed('')).toBe(false);
+    expect(derivedReviewed('unknown')).toBe(false);
+  });
+});
+
 // ─── isSplitRow ───────────────────────────────────────────────────────────────
 
 describe('isSplitRow', () => {
@@ -185,41 +210,6 @@ describe('accountsMatch', () => {
 
   it('does not match when neither has 4-digit suffix', () => {
     expect(accountsMatch('Savings', 'Checking')).toBe(false);
-  });
-});
-
-// ─── checkDedup ───────────────────────────────────────────────────────────────
-
-describe('checkDedup', () => {
-  const existing: ExistingTransactionSummary[] = [
-    { externalId: 'YNAB-abc123', date: '2026-04-13', account: 'Savings', outflow: 28, inflow: 0 },
-    { externalId: 'BTS-xyz789', date: '2026-04-15', account: 'Checking (...1234)', outflow: 50, inflow: 0 },
-  ];
-
-  it('tier 1: returns "skip" on exact external_id match', () => {
-    expect(checkDedup('YNAB-abc123', '2026-04-13', 'Savings', 28, 0, existing)).toBe('skip');
-  });
-
-  it('tier 2: returns "probable_duplicate" on same date + account + amount', () => {
-    expect(checkDedup('YNAB-newid', '2026-04-15', 'My Account ...1234', 50, 0, existing)).toBe('probable_duplicate');
-  });
-
-  it('tier 3: returns "insert" when no match found', () => {
-    expect(checkDedup('YNAB-brand-new', '2026-05-01', 'Savings', 100, 0, existing)).toBe('insert');
-  });
-
-  it('tier 1 takes priority over tier 2', () => {
-    // Even if date+account+amount also match, tier 1 wins
-    expect(checkDedup('YNAB-abc123', '2026-04-13', 'Savings', 28, 0, existing)).toBe('skip');
-  });
-
-  it('amount tolerance is within 0.005', () => {
-    expect(checkDedup('YNAB-newid', '2026-04-13', 'Savings', 28.001, 0, existing)).toBe('probable_duplicate');
-    expect(checkDedup('YNAB-newid', '2026-04-13', 'Savings', 28.01, 0, existing)).toBe('insert');
-  });
-
-  it('returns "insert" for empty existing list', () => {
-    expect(checkDedup('YNAB-anything', '2026-04-13', 'Savings', 28, 0, [])).toBe('insert');
   });
 });
 
@@ -423,44 +413,50 @@ describe('buildRegularTransactionRow', () => {
   const importedAt = '2026-05-01T00:00:00.000Z';
 
   it('sets source to ynab_import', () => {
-    const row = buildRegularTransactionRow(r, importedAt, categoryIndex);
+    const row = buildRegularTransactionRow(r, importedAt, categoryIndex, 0);
     expect(row[col('source')]).toBe('ynab_import');
   });
 
   it('maps Cleared status correctly', () => {
-    const row = buildRegularTransactionRow(r, importedAt, categoryIndex);
+    const row = buildRegularTransactionRow(r, importedAt, categoryIndex, 0);
     expect(row[col('status')]).toBe('cleared');
   });
 
   it('resolves category to canonical name', () => {
-    const row = buildRegularTransactionRow(r, importedAt, categoryIndex);
+    const row = buildRegularTransactionRow(r, importedAt, categoryIndex, 0);
     expect(row[col('category')]).toBe('Groceries 🛒');
   });
 
   it('sets empty parent_id and split_group_id', () => {
-    const row = buildRegularTransactionRow(r, importedAt, categoryIndex);
+    const row = buildRegularTransactionRow(r, importedAt, categoryIndex, 0);
     expect(row[col('parent_id')]).toBe('');
     expect(row[col('split_group_id')]).toBe('');
   });
 
   it('leaves category_group and category_subgroup blank', () => {
-    const row = buildRegularTransactionRow(r, importedAt, categoryIndex);
+    const row = buildRegularTransactionRow(r, importedAt, categoryIndex, 0);
     expect(row[col('category_group')]).toBe('');
     expect(row[col('category_subgroup')]).toBe('');
   });
 
   it('transaction_id equals external_id', () => {
-    const row = buildRegularTransactionRow(r, importedAt, categoryIndex);
+    const row = buildRegularTransactionRow(r, importedAt, categoryIndex, 0);
     expect(row[col('transaction_id')]).toBe(row[col('external_id')]);
   });
 
-  it('sets reviewed to TRUE', () => {
-    const row = buildRegularTransactionRow(r, importedAt, categoryIndex);
-    expect(row[col('reviewed')]).toBe('TRUE');
+  it('sets reviewed true for Cleared transaction', () => {
+    const row = buildRegularTransactionRow(r, importedAt, categoryIndex, 0);
+    expect(row[col('reviewed')]).toBe(true);
+  });
+
+  it('sets reviewed false for Uncleared transaction', () => {
+    const unclearedRow = makeRow({ category: 'Groceries', cleared: 'Uncleared', memo: '' });
+    const row = buildRegularTransactionRow(unclearedRow, importedAt, categoryIndex, 0);
+    expect(row[col('reviewed')]).toBe(false);
   });
 
   it('preserves memo', () => {
-    const row = buildRegularTransactionRow(r, importedAt, categoryIndex);
+    const row = buildRegularTransactionRow(r, importedAt, categoryIndex, 0);
     expect(row[col('memo')]).toBe('Weekly shop');
   });
 });
@@ -593,27 +589,6 @@ describe('parseCsv', () => {
     const rows = parseCsv(csv);
     expect(rows).toHaveLength(1);
     expect(rows[0].date).toBe('2026-04-01');
-  });
-});
-
-// ─── generateExternalId (determinism) ─────────────────────────────────────────
-
-describe('generateExternalId', () => {
-  it('produces same id for same inputs', () => {
-    const id1 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00', 'Split (1/9)');
-    const id2 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00', 'Split (1/9)');
-    expect(id1).toBe(id2);
-  });
-
-  it('produces different id when memo differs', () => {
-    const id1 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00', 'Split (1/9)');
-    const id2 = generateExternalId('Savings', '2026-04-13', 'Food Lion', '.28', '.00', 'Split (2/9)');
-    expect(id1).not.toBe(id2);
-  });
-
-  it('starts with "YNAB-"', () => {
-    const id = generateExternalId('Savings', '2026-04-13', 'Test', '.00', '.00', '');
-    expect(id).toMatch(/^YNAB-/);
   });
 });
 
