@@ -58,8 +58,7 @@ type FormState = {
   transaction_type: TransactionType | '';
   category: string;
   memo: string;
-  outflow: string;
-  inflow: string;
+  amount: string;
   date: string;
   account: string;
   status: TransactionStatus;
@@ -72,8 +71,7 @@ function initForm(tx: Transaction): FormState {
     transaction_type: classifyTransactionType(tx),
     category: tx.category,
     memo: tx.memo,
-    outflow: tx.outflow > 0 ? String(tx.outflow) : '',
-    inflow: tx.inflow > 0 ? String(tx.inflow) : '',
+    amount: String(tx.amount),
     date: tx.date,
     account: tx.account,
     status: tx.status,
@@ -112,10 +110,8 @@ function buildDiff(
     changes.category_type = catRecord?.category_type ?? '';
   }
   if (form.memo !== tx.memo) changes.memo = form.memo;
-  const outflow = parseFloat(form.outflow) || 0;
-  const inflow = parseFloat(form.inflow) || 0;
-  if (outflow !== tx.outflow) changes.outflow = outflow;
-  if (inflow !== tx.inflow) changes.inflow = inflow;
+  const amount = parseFloat(form.amount) || 0;
+  if (amount !== tx.amount) changes.amount = amount;
   if (form.date !== tx.date) changes.date = form.date;
   if (form.account !== tx.account) changes.account = form.account;
   if (form.status !== tx.status) changes.status = form.status;
@@ -296,7 +292,7 @@ function TxDetailEditor({
                 <div key={child.transaction_id} className="tx-edit-split-row">
                   <span className="tx-edit-split-payee">{child.payee || tx.payee}</span>
                   <span className="tx-edit-split-cat">{child.category}</span>
-                  <span className="tx-edit-split-amt">{fmt(child.outflow)}</span>
+                  <span className="tx-edit-split-amt">{fmt(Math.abs(child.amount))}</span>
                 </div>
               ))}
             </div>
@@ -373,7 +369,7 @@ function TxDetailEditor({
                 <div className="tx-edit-pair-result tx-edit-pair-result--found">
                   <span className="tx-edit-pair-label">
                     Found: {getAccountDisplayName(pairCandidate.account)} · {pairCandidate.date}
-                    · {pairCandidate.outflow > 0 ? `-${fmt(pairCandidate.outflow)}` : `+${fmt(pairCandidate.inflow)}`}
+                    · {pairCandidate.amount < 0 ? `-${fmt(-pairCandidate.amount)}` : `+${fmt(pairCandidate.amount)}`}
                   </span>
                   <button className="btn btn-primary" onClick={handleLinkPair} disabled={linkingPair}>
                     {linkingPair ? 'Linking…' : 'Link them'}
@@ -388,33 +384,13 @@ function TxDetailEditor({
       {/* Row 3: Outflow | Inflow */}
       <div className="tx-edit-amount-row">
         <div className="tx-edit-field">
-          <label className="tx-edit-label">Outflow</label>
+          <label className="tx-edit-label">Amount</label>
           <input
             className="tx-edit-input"
             type="number"
-            min="0"
             step="0.01"
-            value={form.outflow}
-            onChange={(e) => {
-              const val = e.target.value;
-              setForm((f) => ({ ...f, outflow: val, ...(parseFloat(val) > 0 ? { inflow: '' } : {}) }));
-              setError(null);
-            }}
-          />
-        </div>
-        <div className="tx-edit-field">
-          <label className="tx-edit-label">Inflow</label>
-          <input
-            className="tx-edit-input"
-            type="number"
-            min="0"
-            step="0.01"
-            value={form.inflow}
-            onChange={(e) => {
-              const val = e.target.value;
-              setForm((f) => ({ ...f, inflow: val, ...(parseFloat(val) > 0 ? { outflow: '' } : {}) }));
-              setError(null);
-            }}
+            value={form.amount}
+            onChange={(e) => { setField('amount', e.target.value); }}
           />
         </div>
       </div>
@@ -480,8 +456,8 @@ function TxDetailEditor({
       <div className="assign-sheet tx-detail-sheet" data-testid="tx-detail" onClick={(e) => e.stopPropagation()}>
         <div className="assign-sheet-handle" />
         <div className="tx-detail-hero">
-          <span className={`tx-detail-amount${tx.inflow > 0 ? ' tx-amount--inflow' : ' tx-amount--outflow'}`}>
-            {tx.inflow > 0 ? `+${fmt(tx.inflow)}` : `-${fmt(tx.outflow)}`}
+          <span className={`tx-detail-amount${tx.amount >= 0 ? ' tx-amount--inflow' : ' tx-amount--outflow'}`}>
+            {tx.amount >= 0 ? `+${fmt(tx.amount)}` : `-${fmt(-tx.amount)}`}
           </span>
           <span className="tx-detail-payee">{tx.payee || tx.description || '(unknown payee)'}</span>
           <span className="tx-detail-date">{tx.date}</span>
@@ -607,7 +583,7 @@ export default function Accounts() {
       const isMutual = pairTx?.transfer_pair_id === tx.transaction_id;
       if (pairTx && isMutual && !suppressed.has(pairTx.transaction_id) && !processed.has(pairTx.transaction_id)) {
         // Prefer the outflow leg as primary
-        const [primary, secondary] = tx.outflow >= pairTx.outflow ? [tx, pairTx] : [pairTx, tx];
+        const [primary, secondary] = Math.abs(tx.amount) >= Math.abs(pairTx.amount) ? [tx, pairTx] : [pairTx, tx];
         suppressed.add(secondary.transaction_id);
         processed.add(primary.transaction_id);
         pairMap.set(primary.transaction_id, secondary);
@@ -677,11 +653,11 @@ export default function Accounts() {
   const handleClose = () => { setSelectedTx(null); setSplitTx(null); setSplitEditChildren([]); };
 
   /** True when the transaction can be split for the first time. */
-  const canSplit = (tx: Transaction) => tx.outflow > 0 && !tx.split_group_id;
+  const canSplit = (tx: Transaction) => tx.amount < 0 && !tx.split_group_id;
 
   /** True when an already-split transaction can have its splits edited. */
   const canEditSplit = (tx: Transaction) =>
-    tx.outflow > 0 && !!tx.split_group_id && splitChildrenMap.has(tx.transaction_id);
+    tx.amount < 0 && !!tx.split_group_id && splitChildrenMap.has(tx.transaction_id);
 
   /** Opens SplitEditor for new or existing split. */
   function handleSplit(tx: Transaction) {
@@ -744,8 +720,7 @@ export default function Accounts() {
                   <span>Payee</span>
                   <span>Category</span>
                   <span>Memo</span>
-                  <span className="tx-hdr-num">Outflow</span>
-                  <span className="tx-hdr-num">Inflow</span>
+                  <span className="tx-hdr-num">Amount</span>
                   <span className="tx-hdr-icon" title="Transaction type">⊕</span>
                   <span className="tx-hdr-icon" title="Reviewed">✓</span>
                   <span className="tx-hdr-icon" title="Cleared">C</span>
@@ -798,11 +773,8 @@ export default function Accounts() {
                               {tx.split_group_id && !tx.parent_id ? 'Split' : (tx.category || 'Uncategorized')}
                             </span>
                             <span className="tx-desktop-cell tx-desktop-cell--secondary">{tx.memo}</span>
-                            <span className={`tx-desktop-cell tx-desktop-cell--num${tx.outflow > 0 ? ' tx-desktop-cell--outflow' : ''}`}>
-                              {tx.outflow > 0 ? fmt(tx.outflow) : ''}
-                            </span>
-                            <span className={`tx-desktop-cell tx-desktop-cell--num${tx.inflow > 0 ? ' tx-desktop-cell--inflow' : ''}`}>
-                              {tx.inflow > 0 ? fmt(tx.inflow) : ''}
+                            <span className={`tx-desktop-cell tx-desktop-cell--num${tx.amount >= 0 ? ' tx-desktop-cell--inflow' : ' tx-desktop-cell--outflow'}`}>
+                              {tx.amount >= 0 ? `+${fmt(tx.amount)}` : `-${fmt(-tx.amount)}`}
                             </span>
                             <span className="tx-desktop-cell tx-desktop-cell--icon" title={txType || 'unknown'}>
                               {typeIcon}
@@ -829,11 +801,8 @@ export default function Accounts() {
                             <span className="tx-desktop-cell tx-desktop-cell--payee tx-desktop-cell--secondary">{pairTx.payee || pairTx.description || '(unknown)'}</span>
                             <span className="tx-desktop-cell tx-desktop-cell--secondary">{pairTx.category}</span>
                             <span className="tx-desktop-cell tx-desktop-cell--secondary">{pairTx.memo}</span>
-                            <span className={`tx-desktop-cell tx-desktop-cell--num${pairTx.outflow > 0 ? ' tx-desktop-cell--outflow' : ''}`}>
-                              {pairTx.outflow > 0 ? fmt(pairTx.outflow) : ''}
-                            </span>
-                            <span className={`tx-desktop-cell tx-desktop-cell--num${pairTx.inflow > 0 ? ' tx-desktop-cell--inflow' : ''}`}>
-                              {pairTx.inflow > 0 ? fmt(pairTx.inflow) : ''}
+                            <span className={`tx-desktop-cell tx-desktop-cell--num${pairTx.amount >= 0 ? ' tx-desktop-cell--inflow' : ' tx-desktop-cell--outflow'}`}>
+                              {pairTx.amount >= 0 ? `+${fmt(pairTx.amount)}` : `-${fmt(-pairTx.amount)}`}
                             </span>
                             <span className="tx-desktop-cell" />
                             <span className="tx-desktop-cell" />
@@ -863,8 +832,9 @@ export default function Accounts() {
                                   <span className="tx-desktop-cell tx-desktop-cell--payee tx-desktop-cell--secondary">{child.payee}</span>
                                   <span className="tx-desktop-cell">{child.category}</span>
                                   <span className="tx-desktop-cell tx-desktop-cell--secondary">{child.memo}</span>
-                                  <span className="tx-desktop-cell tx-desktop-cell--num tx-desktop-cell--outflow">{child.outflow > 0 ? fmt(child.outflow) : ''}</span>
-                                  <span className="tx-desktop-cell tx-desktop-cell--num" />
+                                  <span className={`tx-desktop-cell tx-desktop-cell--num${child.amount >= 0 ? ' tx-desktop-cell--inflow' : ' tx-desktop-cell--outflow'}`}>
+                                    {child.amount >= 0 ? `+${fmt(child.amount)}` : `-${fmt(-child.amount)}`}
+                                  </span>
                                   <span className="tx-desktop-cell" />
                                   <span className="tx-desktop-cell" />
                                   <span className="tx-desktop-cell" />
@@ -900,8 +870,8 @@ export default function Accounts() {
                               {tx.split_group_id && !tx.parent_id ? 'Split' : (tx.category || 'Uncategorized')}
                             </span>
                           </div>
-                          <span className={`tx-amount${tx.inflow > 0 ? ' tx-amount--inflow' : ' tx-amount--outflow'}`}>
-                            {tx.inflow > 0 ? `+${fmt(tx.inflow)}` : `-${fmt(tx.outflow)}`}
+                          <span className={`tx-amount${tx.amount >= 0 ? ' tx-amount--inflow' : ' tx-amount--outflow'}`}>
+                            {tx.amount >= 0 ? `+${fmt(tx.amount)}` : `-${fmt(-tx.amount)}`}
                           </span>
                         </button>
                         {pairTx && (
@@ -912,8 +882,8 @@ export default function Accounts() {
                         {pairTx && isExpanded && (
                           <div className="tx-pair-row">
                             <span className="tx-payee tx-desktop-cell--secondary">{getAccountDisplayName(pairTx.account)}</span>
-                            <span className={`tx-amount${pairTx.inflow > 0 ? ' tx-amount--inflow' : ' tx-amount--outflow'}`}>
-                              {pairTx.inflow > 0 ? `+${fmt(pairTx.inflow)}` : `-${fmt(pairTx.outflow)}`}
+                            <span className={`tx-amount${pairTx.amount >= 0 ? ' tx-amount--inflow' : ' tx-amount--outflow'}`}>
+                              {pairTx.amount >= 0 ? `+${fmt(pairTx.amount)}` : `-${fmt(-pairTx.amount)}`}
                             </span>
                           </div>
                         )}
@@ -937,7 +907,9 @@ export default function Accounts() {
                                 <div key={child.transaction_id} className="tx-split-child-row">
                                   <span className="tx-payee tx-desktop-cell--secondary">{child.payee}</span>
                                   <span className={`tx-category${!child.category ? ' tx-category--none' : ''}`}>{child.category}</span>
-                                  <span className="tx-amount tx-amount--outflow">-{fmt(child.outflow)}</span>
+                                  <span className={`tx-amount${child.amount >= 0 ? ' tx-amount--inflow' : ' tx-amount--outflow'}`}>
+                                    {child.amount >= 0 ? `+${fmt(child.amount)}` : `-${fmt(-child.amount)}`}
+                                  </span>
                                 </div>
                               ))}
                             </>

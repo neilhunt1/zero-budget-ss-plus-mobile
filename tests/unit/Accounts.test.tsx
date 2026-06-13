@@ -93,8 +93,7 @@ function makeTx(overrides: Partial<Transaction> & { transaction_id: string }): T
     category_subgroup: '',
     category_group: '',
     category_type: '',
-    outflow: 50,
-    inflow: 0,
+    amount: -50,
     account: 'Checking',
     memo: '',
     transaction_type: 'regular',
@@ -436,7 +435,7 @@ describe('Transactions screen — visual treatment', () => {
 
   it('outflow amount has tx-amount--outflow class', async () => {
     mockGetRecentTransactions.mockResolvedValue([
-      makeTx({ transaction_id: 'out', outflow: 42.5, inflow: 0 }),
+      makeTx({ transaction_id: 'out', amount: -42.5 }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts />);
@@ -448,7 +447,7 @@ describe('Transactions screen — visual treatment', () => {
 
   it('inflow amount has tx-amount--inflow class', async () => {
     mockGetRecentTransactions.mockResolvedValue([
-      makeTx({ transaction_id: 'in', outflow: 0, inflow: 1500 }),
+      makeTx({ transaction_id: 'in', amount: 1500 }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts />);
@@ -480,7 +479,7 @@ describe('Transactions screen — detail bottom sheet', () => {
 
   it('bottom sheet shows transaction details', async () => {
     mockGetRecentTransactions.mockResolvedValue([
-      makeTx({ transaction_id: 'tx2', payee: 'Trader Joes', category: 'Groceries', outflow: 85, inflow: 0 }),
+      makeTx({ transaction_id: 'tx2', payee: 'Trader Joes', category: 'Groceries', amount: -85 }),
     ]);
     const { default: Accounts } = await import('../../src/screens/Accounts');
     render(<Accounts />);

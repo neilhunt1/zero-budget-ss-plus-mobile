@@ -18,25 +18,23 @@ function mockClient(values: string[][]): SheetsClient {
 // 0=transaction_id, 1=parent_id, 2=split_group_id, 3=source, 4=external_id,
 // 5=imported_at, 6=status, 7=date, 8=payee, 9=description, 10=category,
 // 11=suggested_category, 12=category_subgroup, 13=category_group,
-// 14=category_type, 15=outflow, 16=inflow, 17=account, 18=memo,
-// 19=transaction_type, 20=transfer_pair_id, ...
+// 14=category_type, 15=amount, 16=account, 17=memo,
+// 18=transaction_type, 19=transfer_pair_id, ...
 function txRow(overrides: {
   id?: string;
   parentId?: string;
   date?: string;
   category?: string;
-  outflow?: string;
-  inflow?: string;
+  amount?: string;
   type?: string; // transaction_type
 } = {}): string[] {
-  const row = new Array(26).fill('');
+  const row = new Array(25).fill('');
   row[0] = overrides.id ?? 'tx-1';
   row[1] = overrides.parentId ?? '';
   row[7] = overrides.date ?? '2025-04-01';
   row[10] = overrides.category ?? 'Groceries';
-  row[15] = overrides.outflow ?? '0';
-  row[16] = overrides.inflow ?? '0';
-  row[19] = overrides.type ?? 'debit';
+  row[15] = overrides.amount ?? '0';
+  row[18] = overrides.type ?? 'debit';
   return row;
 }
 
@@ -112,13 +110,12 @@ describe('fetchTransactions', () => {
     expect(result[1].transaction_id).toBe('tx-2');
   });
 
-  it('parses outflow and inflow as floats', async () => {
+  it('parses amount as float', async () => {
     const client = mockClient([
-      txRow({ id: 'tx-1', outflow: '42.50', inflow: '10.00' }),
+      txRow({ id: 'tx-1', amount: '-42.50' }),
     ]);
     const [tx] = await fetchTransactions(client);
-    expect(tx.outflow).toBe(42.5);
-    expect(tx.inflow).toBe(10.0);
+    expect(tx.amount).toBe(-42.5);
   });
 
   it('can combine month filter and limit', async () => {

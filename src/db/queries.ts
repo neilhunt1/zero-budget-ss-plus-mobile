@@ -159,7 +159,7 @@ export async function getAvgDailyIncome(days: number = 90): Promise<number> {
     .aboveOrEqual(cutoffStr)
     .filter((t) => !t.parent_id && t.transaction_type === 'income')
     .toArray();
-  const totalInflow = results.reduce((s, t) => s + t.inflow, 0);
+  const totalInflow = results.reduce((s, t) => s + t.amount, 0);
   return totalInflow / days;
 }
 

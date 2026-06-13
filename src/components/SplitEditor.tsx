@@ -131,7 +131,7 @@ export default function SplitEditor({
         _childRowIndex: c._rowIndex,
         payee: c.payee,
         category: c.category,
-        outflow: String(c.outflow),
+        outflow: String(-c.amount),
       }));
     }
     return [makeLine(parent.payee), makeLine(parent.payee)];
@@ -142,8 +142,9 @@ export default function SplitEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const parentOutflow = -parent.amount;
   const splitTotal = splitLines.reduce((sum, l) => sum + (parseFloat(l.outflow) || 0), 0);
-  const remainder = Math.round((parent.outflow - splitTotal) * 100) / 100;
+  const remainder = Math.round((parentOutflow - splitTotal) * 100) / 100;
   const isValid =
     Math.abs(remainder) < 0.01 &&
     splitLines.length >= 2 &&
@@ -201,7 +202,7 @@ export default function SplitEditor({
           category_group: cat?.category_group ?? '',
           category_subgroup: cat?.category_subgroup ?? '',
           category_type: cat?.category_type ?? '',
-          outflow: parseFloat(l.outflow) || 0,
+          amount: -(parseFloat(l.outflow) || 0),
           _childId: l._childId,
           _childRowIndex: l._childRowIndex,
         };
@@ -222,7 +223,7 @@ export default function SplitEditor({
 
   const totalClass = Math.abs(remainder) < 0.01
     ? 'split-total-valid'
-    : splitTotal > parent.outflow
+    : splitTotal > parentOutflow
       ? 'split-total-over'
       : 'split-total-under';
 
@@ -317,7 +318,7 @@ export default function SplitEditor({
       </button>
 
       <div data-testid="split-total-indicator" className="split-total-row">
-        <span>Total: {fmt(splitTotal)} of {fmt(parent.outflow)}</span>
+        <span>Total: {fmt(splitTotal)} of {fmt(parentOutflow)}</span>
         <span data-testid="split-remaining-indicator" className={totalClass}>
           {Math.abs(remainder) < 0.01
             ? 'Balanced ✓'
@@ -358,7 +359,7 @@ export default function SplitEditor({
       <div className="assign-sheet tx-detail-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="assign-sheet-handle" />
         <div className="tx-detail-hero">
-          <span className="tx-detail-amount tx-amount--outflow">-{fmt(parent.outflow)}</span>
+          <span className="tx-detail-amount tx-amount--outflow">-{fmt(parentOutflow)}</span>
           <span className="tx-detail-payee">{parent.payee || parent.description || '(unknown payee)'}</span>
           <span className="tx-detail-date">{isEditMode ? 'Edit split' : 'Split transaction'}</span>
         </div>

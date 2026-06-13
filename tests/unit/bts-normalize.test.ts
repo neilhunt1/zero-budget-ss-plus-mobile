@@ -125,12 +125,12 @@ describe('normalizeBtsRow', () => {
     expect(normalizeBtsRow({ ...sample, Merchant: '' }).payee).toBe('COSTCO WHSE #0001');
   });
 
-  it('parses outflow amount', () => {
-    expect(normalizeBtsRow(sample).outflow).toBe(87.43);
+  it('computes signed amount (outflow → negative)', () => {
+    expect(normalizeBtsRow(sample).amount).toBe(-87.43);
   });
 
-  it('parses inflow amount (empty → 0)', () => {
-    expect(normalizeBtsRow(sample).inflow).toBe(0);
+  it('computes signed amount (inflow → positive)', () => {
+    expect(normalizeBtsRow({ ...sample, Outflow: '$ 0.00', Inflow: '$ 100.00' }).amount).toBe(100);
   });
 
   it('maps suggested_category from Auto Category', () => {

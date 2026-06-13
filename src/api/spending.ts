@@ -94,7 +94,7 @@ export function aggregateSpending(
     const subMap = byGroup.get(group)!;
     if (!subMap.has(subgroup)) subMap.set(subgroup, new Map());
     const catMap = subMap.get(subgroup)!;
-    catMap.set(cat, (catMap.get(cat) ?? 0) + t.outflow - t.inflow);
+    catMap.set(cat, (catMap.get(cat) ?? 0) + (-t.amount));
   }
 
   return [...byGroup.entries()]

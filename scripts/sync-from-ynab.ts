@@ -99,7 +99,7 @@ const TRANSACTIONS_COLUMNS = [
   'transaction_id', 'parent_id', 'split_group_id', 'source', 'external_id',
   'imported_at', 'status', 'date', 'payee', 'description', 'category',
   'suggested_category', 'category_subgroup', 'category_group', 'category_type',
-  'outflow', 'inflow', 'account', 'memo', 'transaction_type', 'transfer_pair_id',
+  'amount', 'account', 'memo', 'transaction_type', 'transfer_pair_id',
   'flag', 'needs_reimbursement', 'reimbursement_amount', 'matched_id', 'reviewed',
 ];
 
@@ -187,7 +187,7 @@ export function buildOpeningTransactions(
     row[col('status')] = 'cleared';
     row[col('date')] = date;
     row[col('payee')] = 'Opening Balance';
-    row[col('inflow')] = balance;
+    row[col('amount')] = balance;
     row[col('account')] = account;
     row[col('memo')] = 'Seeded from Balance History (BTS)';
     row[col('transaction_type')] = 'credit';

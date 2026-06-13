@@ -137,8 +137,8 @@ describe('buildOpeningTransactions', () => {
     ];
     const rows = buildOpeningTransactions(accounts, fixedNow);
     expect(rows).toHaveLength(1);
-    // account column is index 17; only the Checking row should appear
-    expect(rows[0][17]).toBe('Checking');
+    // account column is index 16; only the Checking row should appear
+    expect(rows[0][16]).toBe('Checking');
   });
 
   it('skips accounts with zero balance', () => {
@@ -161,11 +161,11 @@ describe('buildOpeningTransactions', () => {
     expect(row[payeeIdx]).toBe('Opening Balance');
   });
 
-  it('uses the balance as the inflow amount', () => {
+  it('uses the balance as the amount (positive inflow)', () => {
     const accounts: AccountBalance[] = [{ account: 'Checking', balance: 4567.89 }];
     const [row] = buildOpeningTransactions(accounts, fixedNow);
-    // inflow is at index 16
-    expect(row[16]).toBe(4567.89);
+    // amount is at index 15
+    expect(row[15]).toBe(4567.89);
   });
 
   it('generates deterministic transaction_id from account name', () => {

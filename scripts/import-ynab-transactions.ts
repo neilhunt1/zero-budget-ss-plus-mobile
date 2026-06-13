@@ -61,7 +61,7 @@ const TRANSACTIONS_COLUMNS = [
   'transaction_id', 'parent_id', 'split_group_id', 'source', 'external_id',
   'imported_at', 'status', 'date', 'payee', 'description', 'category',
   'suggested_category', 'category_subgroup', 'category_group', 'category_type',
-  'outflow', 'inflow', 'account', 'memo', 'transaction_type', 'transfer_pair_id',
+  'amount', 'account', 'memo', 'transaction_type', 'transfer_pair_id',
   'flag', 'needs_reimbursement', 'reimbursement_amount', 'matched_id', 'reviewed',
 ];
 
@@ -214,6 +214,7 @@ export function buildSplitParentRow(
 
   const totalOutflow = group.reduce((s, r) => s + r.outflow, 0);
   const totalInflow = group.reduce((s, r) => s + r.inflow, 0);
+  const totalAmount = totalInflow - totalOutflow;
 
   const accountSafe = first.account.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
   const groupHash = shortHash(first.date, first.account, first.payee, String(totalOutflow), String(totalInflow));
@@ -235,8 +236,7 @@ export function buildSplitParentRow(
   row[col('category')] = '';
   row[col('category_group')] = '';
   row[col('category_subgroup')] = '';
-  row[col('outflow')] = totalOutflow;
-  row[col('inflow')] = totalInflow;
+  row[col('amount')] = totalAmount;
   row[col('account')] = first.account;
   row[col('memo')] = '';
   row[col('flag')] = first.flag;
@@ -278,8 +278,7 @@ export function buildSplitChildRows(
     row[col('category')] = canonicalCategory;
     row[col('category_group')] = '';
     row[col('category_subgroup')] = '';
-    row[col('outflow')] = r.outflow;
-    row[col('inflow')] = r.inflow;
+    row[col('amount')] = r.inflow - r.outflow;
     row[col('account')] = r.account;
     row[col('memo')] = cleanMemo;
     row[col('flag')] = r.flag;
@@ -317,8 +316,7 @@ export function buildRegularTransactionRow(
   row[col('category')] = canonicalCategory;
   row[col('category_group')] = '';
   row[col('category_subgroup')] = '';
-  row[col('outflow')] = r.outflow;
-  row[col('inflow')] = r.inflow;
+  row[col('amount')] = r.inflow - r.outflow;
   row[col('account')] = r.account;
   row[col('memo')] = r.memo;
   row[col('flag')] = r.flag;

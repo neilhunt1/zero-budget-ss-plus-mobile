@@ -9,7 +9,7 @@ interface SplitLine {
   category_group: string;
   category_subgroup: string;
   category_type: string;
-  outflow: number;
+  amount: number;
   /** Set when editing an existing child row (its transaction_id). */
   _childId?: string;
   /** Set when editing an existing child row (its _rowIndex, 0 = unsynced). */
@@ -132,8 +132,7 @@ export async function optimisticSplitTransaction(
     category_subgroup: s.category_subgroup,
     category_group: s.category_group,
     category_type: s.category_type as Transaction['category_type'],
-    outflow: s.outflow,
-    inflow: 0,
+    amount: s.amount,
     account: parent.account,
     memo: '',
     transaction_type: 'regular' as TransactionType,
@@ -192,7 +191,7 @@ export async function optimisticEditSplitChildren(
           category_group: split.category_group,
           category_subgroup: split.category_subgroup,
           category_type: split.category_type as Transaction['category_type'],
-          outflow: split.outflow,
+          amount: split.amount,
         },
       });
     } else {
@@ -212,8 +211,7 @@ export async function optimisticEditSplitChildren(
         category_subgroup: split.category_subgroup,
         category_group: split.category_group,
         category_type: split.category_type as Transaction['category_type'],
-        outflow: split.outflow,
-        inflow: 0,
+        amount: split.amount,
         account: parent.account,
         memo: '',
         transaction_type: 'regular' as TransactionType,

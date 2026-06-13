@@ -30,8 +30,7 @@ const TRANSACTIONS_COLUMNS = [
   "category_subgroup",
   "category_group",
   "category_type",
-  "outflow",
-  "inflow",
+  "amount",
   "account",
   "memo",
   "transaction_type",
@@ -432,17 +431,16 @@ async function setColumnWidths(
     12: 160, // category_subgroup
     13: 160, // category_group
     14: 130, // category_type
-    15: 90,  // outflow
-    16: 90,  // inflow
-    17: 160, // account
-    18: 240, // memo
-    19: 130, // transaction_type
-    20: 220, // transfer_pair_id
-    21: 80,  // flag
-    22: 160, // needs_reimbursement
-    23: 160, // reimbursement_amount
-    24: 220, // matched_id
-    25: 90,  // reviewed
+    15: 90,  // amount
+    16: 160, // account
+    17: 240, // memo
+    18: 130, // transaction_type
+    19: 220, // transfer_pair_id
+    20: 80,  // flag
+    21: 160, // needs_reimbursement
+    22: 160, // reimbursement_amount
+    23: 220, // matched_id
+    24: 90,  // reviewed
   };
 
   const requests: sheets_v4.Schema$Request[] = Object.entries(widths).map(
@@ -947,7 +945,7 @@ async function writeMetaTab(
     ["key", "value"],
     [
       "ReadyToAssign",
-      `=SUM(Transactions!Q2:Q)-SUM(Transactions!P2:P)-SUM(Budget!C${dataStart}:C)`,
+      `=SUM(Transactions!P2:P)-SUM(Budget!C${dataStart}:C)`,
     ],
     ["LastYnabSync", ""],
     [
@@ -1248,9 +1246,8 @@ async function writeBudgetCalcs(
       // all current and future rows. Google Sheets handles unbounded SUMIFS
       // efficiently — it does not scan blank rows once data ends.
       const txBase = `Transactions!$K$2:$K,B${R},Transactions!$H$2:$H,">="&${monthStart},Transactions!$H$2:$H,"<"&${monthEnd},Transactions!$B$2:$B,"",Transactions!$T$2:$T,"<>transfer"`;
-      const activityFormula =
-        `=SUMIFS(Transactions!$P$2:$P,${txBase})` +
-        `-SUMIFS(Transactions!$Q$2:$Q,${txBase})`;
+      // amount = inflow − outflow, so activity (outflow − inflow) = −amount
+      const activityFormula = `=-SUMIFS(Transactions!$P$2:$P,${txBase})`;
 
       // Assigned: sum of all assignment rows for this category+month.
       const assignedFormula =
@@ -1604,6 +1601,127 @@ async function migrateV6ToV7(
   log("Migration: v6 → v7 complete");
 }
 
+// ─── Step: Migrate outflow+inflow → amount ────────────────────────────────────
+//
+// Detects the old two-column schema (outflow at P, inflow at Q) and migrates
+// in-place to a single signed amount column (amount = inflow - outflow).
+//
+// Idempotent: if the header row already has "amount" at column P, skips.
+
+async function migrateOutflowInflowToAmount(
+  sheets: sheets_v4.Sheets,
+  sheetId: string,
+  sheetMeta: sheets_v4.Schema$Sheet[]
+): Promise<void> {
+  const txSheet = findSheet(sheetMeta, "Transactions");
+  if (!txSheet) {
+    log("Migration (amount): Transactions tab not found, skipping");
+    return;
+  }
+  const txSheetId = txSheet.properties?.sheetId;
+  if (txSheetId == null) {
+    log("Migration (amount): Transactions sheetId missing, skipping");
+    return;
+  }
+
+  const headerRes = await withRetry("Migration (amount): read header", () =>
+    sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: "Transactions!1:1",
+    })
+  );
+  const headers: string[] = (headerRes.data.values?.[0] ?? []).map(String);
+  const amountIdx = headers.indexOf("amount");
+  const outflowIdx = headers.indexOf("outflow");
+  const inflowIdx = headers.indexOf("inflow");
+
+  if (amountIdx !== -1) {
+    log("Migration (amount): amount column already present, skipping");
+    return;
+  }
+
+  if (outflowIdx === -1 || inflowIdx === -1) {
+    log("Migration (amount): outflow/inflow columns not found, skipping");
+    return;
+  }
+
+  log("Migration (amount): detected outflow+inflow schema — migrating to signed amount...");
+
+  // Read all data rows
+  const dataRes = await withRetry("Migration (amount): read data", () =>
+    sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: "Transactions!A2:Z",
+      valueRenderOption: "UNFORMATTED_VALUE",
+    })
+  );
+  const rows = dataRes.data.values ?? [];
+
+  // Compute amount = inflow - outflow for each row
+  const newAmountCol = rows.map((row) => {
+    const outflow = parseFloat(String(row[outflowIdx] ?? 0)) || 0;
+    const inflow = parseFloat(String(row[inflowIdx] ?? 0)) || 0;
+    return [inflow - outflow];
+  });
+
+  // Convert 0-based column index to A1 letter
+  function colLetter(idx: number): string {
+    let s = "";
+    let n = idx + 1;
+    while (n > 0) {
+      s = String.fromCharCode(((n - 1) % 26) + 65) + s;
+      n = Math.floor((n - 1) / 26);
+    }
+    return s;
+  }
+
+  const outflowLetter = colLetter(outflowIdx);
+
+  // Write "amount" header
+  await withRetry("Migration (amount): write header", () =>
+    sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: `Transactions!${outflowLetter}1`,
+      valueInputOption: "RAW",
+      requestBody: { values: [["amount"]] },
+    })
+  );
+
+  // Write computed amounts to the outflow column
+  if (newAmountCol.length > 0) {
+    await withRetry("Migration (amount): write amounts", () =>
+      sheets.spreadsheets.values.update({
+        spreadsheetId: sheetId,
+        range: `Transactions!${outflowLetter}2`,
+        valueInputOption: "RAW",
+        requestBody: { values: newAmountCol },
+      })
+    );
+  }
+
+  // Delete the inflow column (shifts all columns after it left by 1)
+  const inflowColIndex = inflowIdx; // 0-based
+  await withRetry("Migration (amount): delete inflow column", () =>
+    sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: {
+        requests: [{
+          deleteDimension: {
+            range: {
+              sheetId: txSheetId,
+              dimension: "COLUMNS",
+              startIndex: inflowColIndex,
+              endIndex: inflowColIndex + 1,
+            },
+          },
+        }],
+      },
+    })
+  );
+
+  log(`Migration (amount): converted ${rows.length} rows, deleted inflow column`);
+}
+
 // ─── Logging & Error Helpers ──────────────────────────────────────────────────
 
 function log(msg: string): void {
@@ -1671,6 +1789,9 @@ async function main(): Promise<void> {
 
   // 5a. Migrate v6 → v7: move Budget category/dashboard data to dedicated tabs
   await migrateV6ToV7(sheets, sheetId);
+
+  // 5b. Migrate outflow+inflow → single signed amount column
+  await migrateOutflowInflowToAmount(sheets, sheetId, sheetMeta);
 
   // 6. Write Meta tab FIRST — before any other writes. The Meta tab contains
   // live SUM/SUMIF formulas (ReadyToAssign etc.) that Google Sheets must

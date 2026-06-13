@@ -19,8 +19,7 @@ function tx(overrides: Partial<Transaction>): Transaction {
     category_subgroup: '',
     category_group: '',
     category_type: '',
-    outflow: 0,
-    inflow: 0,
+    amount: 0,
     account: '',
     memo: '',
     transaction_type: 'regular',
@@ -37,9 +36,9 @@ function tx(overrides: Partial<Transaction>): Transaction {
 describe('aggregateSpending', () => {
   it('groups outflows by category_group', () => {
     const txns = [
-      tx({ category_group: 'Food', category: 'Groceries 🛒', outflow: 100 }),
-      tx({ category_group: 'Food', category: 'Restaurants', outflow: 50 }),
-      tx({ category_group: 'Transport', category: 'Gas', outflow: 40 }),
+      tx({ category_group: 'Food', category: 'Groceries 🛒', amount: -100 }),
+      tx({ category_group: 'Food', category: 'Restaurants', amount: -50 }),
+      tx({ category_group: 'Transport', category: 'Gas', amount: -40 }),
     ];
     const result = aggregateSpending(txns, null);
     expect(result).toHaveLength(2);
@@ -51,8 +50,8 @@ describe('aggregateSpending', () => {
 
   it('excludes transfers', () => {
     const txns = [
-      tx({ category_group: 'Food', outflow: 100 }),
-      tx({ category_group: 'Savings', outflow: 500, transaction_type: 'transfer' }),
+      tx({ category_group: 'Food', amount: -100 }),
+      tx({ category_group: 'Savings', amount: -500, transaction_type: 'transfer' }),
     ];
     const result = aggregateSpending(txns, null);
     expect(result).toHaveLength(1);
@@ -61,8 +60,8 @@ describe('aggregateSpending', () => {
 
   it('excludes income transactions (transaction_type = income)', () => {
     const txns = [
-      tx({ category_group: 'Income', inflow: 5000, outflow: 0, transaction_type: 'income' }),
-      tx({ category_group: 'Food', outflow: 100 }),
+      tx({ category_group: 'Income', amount: 5000, transaction_type: 'income' }),
+      tx({ category_group: 'Food', amount: -100 }),
     ];
     const result = aggregateSpending(txns, null);
     expect(result).toHaveLength(1);
@@ -71,8 +70,8 @@ describe('aggregateSpending', () => {
 
   it('excludes credit_payment transactions', () => {
     const txns = [
-      tx({ category_group: 'Food', outflow: 100 }),
-      tx({ outflow: 500, transaction_type: 'credit_payment' }),
+      tx({ category_group: 'Food', amount: -100 }),
+      tx({ amount: -500, transaction_type: 'credit_payment' }),
     ];
     const result = aggregateSpending(txns, null);
     expect(result).toHaveLength(1);
@@ -82,9 +81,9 @@ describe('aggregateSpending', () => {
   it('nets inflow (refund/credit) against outflow within the same category', () => {
     // 2000 + 3000 outflow, 5600 refund → net -600 (category shows as negative spend)
     const txns = [
-      tx({ category_group: 'Housing', category: 'Escrow', outflow: 2000, inflow: 0 }),
-      tx({ category_group: 'Housing', category: 'Escrow', outflow: 3000, inflow: 0 }),
-      tx({ category_group: 'Housing', category: 'Escrow', outflow: 0, inflow: 5600 }),
+      tx({ category_group: 'Housing', category: 'Escrow', amount: -2000 }),
+      tx({ category_group: 'Housing', category: 'Escrow', amount: -3000 }),
+      tx({ category_group: 'Housing', category: 'Escrow', amount: 5600 }),
     ];
     const result = aggregateSpending(txns, null);
     expect(result).toHaveLength(1);
@@ -93,8 +92,8 @@ describe('aggregateSpending', () => {
 
   it('shows category with positive net after inflow netting', () => {
     const txns = [
-      tx({ category_group: 'Housing', category: 'Escrow', outflow: 6000, inflow: 0 }),
-      tx({ category_group: 'Housing', category: 'Escrow', outflow: 0, inflow: 1000 }), // partial refund
+      tx({ category_group: 'Housing', category: 'Escrow', amount: -6000 }),
+      tx({ category_group: 'Housing', category: 'Escrow', amount: 1000 }), // partial refund
     ];
     const result = aggregateSpending(txns, null);
     expect(result).toHaveLength(1);
@@ -103,8 +102,8 @@ describe('aggregateSpending', () => {
 
   it('filters by selectedCategories when provided', () => {
     const txns = [
-      tx({ category_group: 'Food', category: 'Groceries', outflow: 100 }),
-      tx({ category_group: 'Fun', category: 'Movies', outflow: 30 }),
+      tx({ category_group: 'Food', category: 'Groceries', amount: -100 }),
+      tx({ category_group: 'Fun', category: 'Movies', amount: -30 }),
     ];
     const result = aggregateSpending(txns, new Set(['Groceries']));
     expect(result).toHaveLength(1);
@@ -113,9 +112,9 @@ describe('aggregateSpending', () => {
 
   it('sorts groups by total descending', () => {
     const txns = [
-      tx({ category_group: 'A', outflow: 10 }),
-      tx({ category_group: 'B', outflow: 200 }),
-      tx({ category_group: 'C', outflow: 50 }),
+      tx({ category_group: 'A', amount: -10 }),
+      tx({ category_group: 'B', amount: -200 }),
+      tx({ category_group: 'C', amount: -50 }),
     ];
     const result = aggregateSpending(txns, null);
     expect(result.map((r) => r.group)).toEqual(['B', 'C', 'A']);

@@ -31,11 +31,11 @@ function fmtDate(iso: string): string {
 }
 
 function txAmount(tx: Transaction): number {
-  return tx.inflow > 0 ? tx.inflow : tx.outflow;
+  return Math.abs(tx.amount);
 }
 
 function txAmountLabel(tx: Transaction): string {
-  const sign = tx.inflow > 0 ? '+' : '-';
+  const sign = tx.amount >= 0 ? '+' : '-';
   return `${sign}${fmt(txAmount(tx))}`;
 }
 
@@ -301,7 +301,7 @@ function StaleManualBanner({ txns, onDelete }: { txns: Transaction[]; onDelete: 
                 <span className="stale-manual-item__meta">{fmtDate(tx.date)} · {tx.account}</span>
               </div>
               <span className="stale-manual-item__amount">
-                {tx.outflow > 0 ? `-${fmt(tx.outflow)}` : `+${fmt(tx.inflow)}`}
+                {tx.amount < 0 ? `-${fmt(-tx.amount)}` : `+${fmt(tx.amount)}`}
               </span>
               <button className="stale-manual-item__delete" onClick={() => onDelete(tx)} title="Cancel transaction">
                 Delete
@@ -392,7 +392,7 @@ export default function Triage() {
   // Must be declared before any early returns so hook call order is stable.
   const handleDeleteStaleManual = useCallback(async (tx: Transaction) => {
     if (!token) return;
-    if (!confirm(`Delete "${tx.payee || 'this transaction'}" (${tx.outflow > 0 ? fmt(tx.outflow) : fmt(tx.inflow)})?`)) return;
+    if (!confirm(`Delete "${tx.payee || 'this transaction'}" (${fmt(Math.abs(tx.amount))})?`)) return;
     try {
       await db.transactions.delete(tx.transaction_id);
       const client = new SheetsClient(SHEET_ID, token);

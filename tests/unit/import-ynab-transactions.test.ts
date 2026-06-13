@@ -295,7 +295,7 @@ const TRANSACTIONS_COLUMNS = [
   'transaction_id', 'parent_id', 'split_group_id', 'source', 'external_id',
   'imported_at', 'status', 'date', 'payee', 'description', 'category',
   'suggested_category', 'category_subgroup', 'category_group', 'category_type',
-  'outflow', 'inflow', 'account', 'memo', 'transaction_type', 'transfer_pair_id',
+  'amount', 'account', 'memo', 'transaction_type', 'transfer_pair_id',
   'flag', 'needs_reimbursement', 'reimbursement_amount', 'matched_id', 'reviewed',
 ];
 const col = (name: string) => TRANSACTIONS_COLUMNS.indexOf(name);
@@ -317,9 +317,9 @@ describe('buildSplitParentRow', () => {
     expect(parentRow[col('payee')]).toBe('Food Lion');
   });
 
-  it('sums outflow from all children', () => {
+  it('computes amount as sum of (inflow - outflow) from all children', () => {
     const { parentRow } = buildSplitParentRow(splitGroup, importedAt);
-    expect(parseFloat(parentRow[col('outflow')])).toBeCloseTo(0.41);
+    expect(parseFloat(String(parentRow[col('amount')]))).toBeCloseTo(-0.41);
   });
 
   it('leaves category blank', () => {

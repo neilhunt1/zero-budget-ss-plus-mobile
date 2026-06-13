@@ -19,9 +19,8 @@ const COLS = [
   'category_subgroup',  // M
   'category_group',     // N
   'category_type',      // O
-  'outflow',            // P
-  'inflow',             // Q
-  'account',            // R
+  'amount',             // P
+  'account',            // Q
   'memo',               // S
   'transaction_type',   // T
   'transfer_pair_id',   // U
@@ -56,8 +55,7 @@ function parseRow(row: string[], rowIndex: number): Transaction {
     category_subgroup: c('category_subgroup'),
     category_group: c('category_group'),
     category_type: c('category_type') as CategoryType | '',
-    outflow: parseFloat(c('outflow')) || 0,
-    inflow: parseFloat(c('inflow')) || 0,
+    amount: parseFloat(c('amount')) || 0,
     account: c('account'),
     memo: c('memo'),
     transaction_type: c('transaction_type') as TransactionType | '',
@@ -100,7 +98,7 @@ export async function fetchTransactions(
   client: SheetsClient,
   opts: FetchTransactionsOptions = {}
 ): Promise<Transaction[]> {
-  const res = await client.getValues('Transactions!A2:Z');
+  const res = await client.getValues('Transactions!A2:Y');
   const rows = res.values ?? [];
 
   let transactions = rows.map((row, i) => parseRow(row, i + 2));
@@ -214,11 +212,11 @@ export function classifyTransactionType(tx: Transaction): TransactionType | '' {
   // Legacy mappings
   if ((tx.transaction_type as string) === 'debit') return 'regular';
   if ((tx.transaction_type as string) === 'credit') {
-    return tx.inflow > 0 && !tx.category ? 'income' : 'regular';
+    return tx.amount > 0 && !tx.category ? 'income' : 'regular';
   }
   // Blank — infer from structural signals only (avoid false income classification)
   if (tx.transfer_pair_id) return 'transfer';
-  if (tx.outflow > 0 || (tx.inflow > 0 && tx.category)) return 'regular';
+  if (tx.amount < 0 || (tx.amount > 0 && tx.category)) return 'regular';
   // Uncategorized inflow with no pair — leave unclassified so triage handles it
   return '';
 }
@@ -231,12 +229,12 @@ export function findTransferPair(
   tx: Transaction,
   allTxns: Transaction[]
 ): Transaction | null {
-  const amount = tx.outflow || tx.inflow;
+  const amount = Math.abs(tx.amount);
   const txTime = new Date(tx.date).getTime();
   return (
     allTxns.find((other) => {
       if (other.transaction_id === tx.transaction_id || other.account === tx.account) return false;
-      const otherAmount = other.outflow || other.inflow;
+      const otherAmount = Math.abs(other.amount);
       if (Math.abs(otherAmount - amount) > 0.01) return false;
       const daysDiff = Math.abs(new Date(other.date).getTime() - txTime) / 86_400_000;
       return daysDiff <= 7;
@@ -254,7 +252,7 @@ export function findCcPaymentPair(
   allTxns: Transaction[]
 ): Transaction | null {
   const txType = getAccountType(tx.account);
-  const amount = tx.outflow || tx.inflow;
+  const amount = Math.abs(tx.amount);
   const txTime = new Date(tx.date).getTime();
   return (
     allTxns.find((other) => {
@@ -263,7 +261,7 @@ export function findCcPaymentPair(
       // Must be credit ↔ depository
       if (!((txType === 'credit' && otherType === 'depository') ||
             (txType === 'depository' && otherType === 'credit'))) return false;
-      const otherAmount = other.outflow || other.inflow;
+      const otherAmount = Math.abs(other.amount);
       if (Math.abs(otherAmount - amount) > 0.01) return false;
       const daysDiff = Math.abs(new Date(other.date).getTime() - txTime) / 86_400_000;
       return daysDiff <= 7;
@@ -281,7 +279,7 @@ export function computeCategoryActivity(
   const map = new Map<string, number>();
   for (const tx of transactions) {
     if (!tx.category || tx.transaction_type === 'transfer' || tx.transaction_type === 'credit_payment' || tx.transaction_type === 'income') continue;
-    map.set(tx.category, (map.get(tx.category) ?? 0) + tx.outflow - tx.inflow);
+    map.set(tx.category, (map.get(tx.category) ?? 0) + (-tx.amount));
   }
   return map;
 }

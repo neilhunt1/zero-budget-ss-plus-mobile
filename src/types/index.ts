@@ -23,8 +23,7 @@ export interface Transaction {
   category_subgroup: string;
   category_group: string;
   category_type: CategoryType | '';
-  outflow: number;
-  inflow: number;
+  amount: number;
   account: string;
   memo: string;
   transaction_type: TransactionType | '';
