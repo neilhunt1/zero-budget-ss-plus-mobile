@@ -289,7 +289,7 @@ function StaleManualBanner({ txns, onDelete }: { txns: Transaction[]; onDelete: 
   return (
     <div className="stale-manual-banner">
       <button className="stale-manual-banner__toggle" onClick={() => setOpen((o) => !o)}>
-        <span>⚠️ {txns.length} manual {txns.length === 1 ? 'transaction hasn't' : 'transactions haven't'} cleared in {STALE_DAYS}+ days</span>
+        <span>⚠️ {txns.length} manual {txns.length === 1 ? "transaction hasn't" : "transactions haven't"} cleared in {STALE_DAYS}+ days</span>
         <span className="stale-manual-banner__chevron">{open ? '▲' : '▾'}</span>
       </button>
       {open && (
