@@ -754,6 +754,22 @@ async function setupAccountsTab(
             fields: "gridProperties.frozenRowCount",
           },
         },
+        // active column (D, index 3) → BOOLEAN checkbox, data rows only (row 3+)
+        {
+          setDataValidation: {
+            range: {
+              sheetId: tabSheetId,
+              startRowIndex: 2,
+              startColumnIndex: ACCOUNTS_SECTION1_COLUMNS.indexOf("active"),
+              endColumnIndex: ACCOUNTS_SECTION1_COLUMNS.indexOf("active") + 1,
+            },
+            rule: {
+              condition: { type: "BOOLEAN" },
+              showCustomUi: true,
+              strict: true,
+            },
+          },
+        },
       ],
     },
   });
