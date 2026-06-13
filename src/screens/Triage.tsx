@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuth } from '../hooks/useAuth';
@@ -8,7 +8,7 @@ import {
   findTransferPair,
   findCcPaymentPair,
 } from '../api/transactions';
-import { getActiveBudgetCategories, getSuggestedCategory } from '../db/queries';
+import { getActiveBudgetCategories, getSuggestedCategory, getStaleManualCount } from '../db/queries';
 import {
   optimisticApproveIncome,
   optimisticConfirmTransfer,
@@ -273,6 +273,47 @@ function PurchaseCard({
   );
 }
 
+// ─── Stale manual transaction banner ─────────────────────────────────────────
+
+const STALE_DAYS = 14;
+
+function staleCutoff(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - STALE_DAYS);
+  return d.toISOString().slice(0, 10);
+}
+
+function StaleManualBanner({ txns, onDelete }: { txns: Transaction[]; onDelete: (tx: Transaction) => void }) {
+  const [open, setOpen] = useState(false);
+  if (txns.length === 0) return null;
+  return (
+    <div className="stale-manual-banner">
+      <button className="stale-manual-banner__toggle" onClick={() => setOpen((o) => !o)}>
+        <span>⚠️ {txns.length} manual {txns.length === 1 ? "transaction hasn't" : "transactions haven't"} cleared in {STALE_DAYS}+ days</span>
+        <span className="stale-manual-banner__chevron">{open ? '▲' : '▾'}</span>
+      </button>
+      {open && (
+        <ul className="stale-manual-list">
+          {txns.map((tx) => (
+            <li key={tx.transaction_id} className="stale-manual-item">
+              <div className="stale-manual-item__info">
+                <span className="stale-manual-item__payee">{tx.payee || '(no payee)'}</span>
+                <span className="stale-manual-item__meta">{fmtDate(tx.date)} · {tx.account}</span>
+              </div>
+              <span className="stale-manual-item__amount">
+                {tx.outflow > 0 ? `-${fmt(tx.outflow)}` : `+${fmt(tx.inflow)}`}
+              </span>
+              <button className="stale-manual-item__delete" onClick={() => onDelete(tx)} title="Cancel transaction">
+                Delete
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function TypeSelectCard({ onSelect }: { onSelect: (type: TransactionType) => void }) {
   return (
     <div className="triage-card triage-card--type-select">
@@ -299,14 +340,23 @@ export default function Triage() {
   const allTxns = rawAllTxns ?? [];
   const categories = rawCategories ?? [];
 
-  // Unreviewed, non-split-child transactions, oldest-first
+  // Unreviewed, non-split-child, non-manual transactions, oldest-first.
+  // Manual transactions are pre-entered by the user and don't need triage unless stale.
   const triageQueue = useMemo(
     () =>
       allTxns
-        .filter((t) => !t.parent_id && !t.reviewed)
+        .filter((t) => !t.parent_id && !t.reviewed && t.status !== 'manual')
         .sort((a, b) => a.date.localeCompare(b.date)),
     [allTxns]
   );
+
+  // Manual transactions that haven't cleared in STALE_DAYS days
+  const staleManual = useMemo(() => {
+    const cutoff = staleCutoff();
+    return allTxns.filter(
+      (t) => t.status === 'manual' && !t.matched_id && t.date <= cutoff
+    );
+  }, [allTxns]);
 
   const [index, setIndex] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState('');
@@ -339,6 +389,20 @@ export default function Triage() {
   const advance = () => setIndex((i) => i + 1);
   const goBack = () => setIndex((i) => Math.max(0, i - 1));
 
+  // Must be declared before any early returns so hook call order is stable.
+  const handleDeleteStaleManual = useCallback(async (tx: Transaction) => {
+    if (!token) return;
+    if (!confirm(`Delete "${tx.payee || 'this transaction'}" (${tx.outflow > 0 ? fmt(tx.outflow) : fmt(tx.inflow)})?`)) return;
+    try {
+      await db.transactions.delete(tx.transaction_id);
+      const client = new SheetsClient(SHEET_ID, token);
+      await client.updateValues(`Transactions!A${tx._rowIndex}`, [['']] );
+    } catch (e) {
+      if (e instanceof AuthError) { notifySessionExpired(); return; }
+      setError('Failed to delete — please try again');
+    }
+  }, [token, notifySessionExpired]);
+
   if (rawAllTxns === undefined || rawCategories === undefined) {
     return <div className="screen triage-screen"><div className="state-msg">Loading…</div></div>;
   }
@@ -361,6 +425,7 @@ export default function Triage() {
   if (index >= total) {
     return (
       <div className="screen triage-screen">
+        <StaleManualBanner txns={staleManual} onDelete={handleDeleteStaleManual} />
         <div className="triage-all-caught-up">
           <div className="triage-caught-up-emoji">🎉</div>
           <div className="triage-caught-up-text">All caught up!</div>
@@ -439,6 +504,8 @@ export default function Triage() {
           <button className="triage-nav-btn" onClick={advance} disabled={index >= total - 1}>›</button>
         </div>
       </header>
+
+      <StaleManualBanner txns={staleManual} onDelete={handleDeleteStaleManual} />
 
       <div className="triage-card-wrapper">
         {effectiveType === '' && (
