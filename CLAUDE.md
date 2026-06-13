@@ -199,6 +199,18 @@ See **[docs/ynab-sync-runbook.md](docs/ynab-sync-runbook.md)** for the full YNAB
 
 ---
 
+## Data import language
+
+When discussing or implementing data import features, refer to the import process generically (e.g. "the import script", "legacy data import", "external data source") rather than naming YNAB specifically. The exception is code or config that is genuinely YNAB-specific to the data model (e.g. a script named `import-ynab-register.ts` may keep that name). In docs, comments, issue descriptions, and UI copy, keep the language source-agnostic — we may support other import sources in the future and don't want to couple user-facing language to one provider.
+
+---
+
+## User Guide
+
+`docs/USER_GUIDE.md` is the end-user guide for Zero Budget. When implementing a new user-facing feature, add (or update) the relevant section before closing the PR. If the feature is not yet fully built, add a placeholder section with a note and a list of topics to cover when it is.
+
+---
+
 ## What NOT to do
 - Never manually edit the Google Sheet structure — always use setup-sheet.ts
 - Never insert columns in the middle — always append right

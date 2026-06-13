@@ -117,8 +117,18 @@ export async function getTransactionsByCategory(category: string): Promise<Trans
 }
 
 export async function getUnreviewedCount(): Promise<number> {
-  // Dexie indexes booleans as 0/1 — filter() handles the boolean correctly
-  return db.transactions.filter((t) => !t.parent_id && !t.reviewed).count();
+  // Excludes status='manual' transactions — those are pre-entered and don't need triage
+  // until they go stale (14+ days unmatched), counted separately by getStaleManualCount.
+  return db.transactions.filter((t) => !t.parent_id && !t.reviewed && t.status !== 'manual').count();
+}
+
+export async function getStaleManualCount(): Promise<number> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 14);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  return db.transactions.filter(
+    (t) => t.status === 'manual' && !t.matched_id && t.date <= cutoffStr
+  ).count();
 }
 
 export async function getActiveBudgetCategories(): Promise<BudgetCategory[]> {
