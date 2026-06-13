@@ -90,6 +90,21 @@ export interface Template {
   _rowIndex: number;
 }
 
+export interface Account {
+  canonical_name: string; // primary key — also stored in Transactions!account
+  display_name: string;   // optional friendly label for the UI; falls back to canonical_name
+  type: string;           // 'depository' | 'credit' | 'savings' | etc. (user-managed)
+  active: boolean;
+  display_order: number;
+  _rowIndex: number;
+}
+
+export interface AccountAlias {
+  alias: string;
+  canonical_name: string; // maps to Account.canonical_name
+  _rowIndex: number;
+}
+
 // ─── Derived / Computed ────────────────────────────────────────────────────────
 
 /** One row from Budget_Calcs, stored in IndexedDB for instant budget queries. */

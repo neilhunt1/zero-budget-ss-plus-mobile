@@ -97,6 +97,7 @@ const TABS_USER_FACING = [
   "Categories",
   "Groups",
   "Split Rules",
+  "Accounts",
   "Reflect",
 ];
 
@@ -113,6 +114,17 @@ const TABS_IN_ORDER = [...TABS_USER_FACING, ...TABS_PROCESS];
 
 const BUDGET_CALCS_COLUMNS = ["month", "category", "activity", "assigned", "available"];
 
+// Accounts tab — two vertical sections separated by an empty column (col F).
+// Section 1 (A–E): canonical account definitions.
+// Section 2 (G–H): alias → canonical_name mapping for external import sources.
+const ACCOUNTS_SECTION1_COLUMNS = ["canonical_name", "display_name", "type", "active", "display_order"];
+const ACCOUNTS_SECTION2_COLUMNS = ["alias", "canonical_name"];
+const ACCOUNTS_SECTION1_LABEL = "Accounts";
+const ACCOUNTS_SECTION2_LABEL = "Account Aliases";
+// Column indices (0-based) for the two section headers in row 1.
+const ACCOUNTS_SECTION1_START_COL = 0; // col A
+const ACCOUNTS_SECTION2_START_COL = 6; // col G (col F is empty separator)
+
 // How many months back/forward from today to generate Budget_Calcs rows.
 const CALCS_MONTHS_BACK = 36;
 const CALCS_MONTHS_FORWARD = 24;
@@ -124,7 +136,9 @@ const HEADER_FG_COLOR = { red: 1, green: 1, blue: 1 };
 // Sheet schema version — increment when structure changes
 // v8: gated formatting/validation steps behind version check (skip on already-current sheets);
 //     formula version check in Budget_Calcs spot-check; open-ended column ranges.
-const SHEET_VERSION = 8;
+// v9: Accounts tab with canonical account names, display names, types, and alias mapping;
+//     account column validation on Transactions tab.
+const SHEET_VERSION = 9;
 
 // ─── Environment Loading ───────────────────────────────────────────────────────
 
@@ -615,6 +629,204 @@ async function addCategoryDataValidation(
 }
 
 
+
+// ─── Step: Accounts tab ───────────────────────────────────────────────────────
+//
+// Layout (two vertical sections, col F is an empty separator):
+//   Row 1: Merged section header "Accounts" (A1:E1), merged "Account Aliases" (G1:H1)
+//   Row 2: Column sub-headers for each section
+//   Row 3+: Data rows (seeded on first run from distinct Transactions!account values)
+
+async function setupAccountsTab(
+  sheets: sheets_v4.Sheets,
+  sheetId: string,
+  sheetMeta: sheets_v4.Schema$Sheet[]
+): Promise<void> {
+  const meta = findSheet(sheetMeta, "Accounts");
+  if (!meta) return;
+  const tabSheetId = meta.properties?.sheetId!;
+
+  // ── Row 1: section header labels (merged cells) ──────────────────────────
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId,
+    range: "Accounts!A1",
+    valueInputOption: "RAW",
+    requestBody: { values: [[ACCOUNTS_SECTION1_LABEL]] },
+  });
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId,
+    range: "Accounts!G1",
+    valueInputOption: "RAW",
+    requestBody: { values: [[ACCOUNTS_SECTION2_LABEL]] },
+  });
+
+  // ── Row 2: column sub-headers ────────────────────────────────────────────
+  const row2: string[] = [
+    ...ACCOUNTS_SECTION1_COLUMNS,
+    "",  // col F — empty separator
+    ...ACCOUNTS_SECTION2_COLUMNS,
+  ];
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId,
+    range: "Accounts!A2",
+    valueInputOption: "RAW",
+    requestBody: { values: [row2] },
+  });
+
+  // ── Formatting: merge row 1 headers, bold row 2, freeze row 2 ────────────
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: sheetId,
+    requestBody: {
+      requests: [
+        // Merge "Accounts" header across A1:E1
+        {
+          mergeCells: {
+            range: {
+              sheetId: tabSheetId,
+              startRowIndex: 0, endRowIndex: 1,
+              startColumnIndex: ACCOUNTS_SECTION1_START_COL,
+              endColumnIndex: ACCOUNTS_SECTION1_START_COL + ACCOUNTS_SECTION1_COLUMNS.length,
+            },
+            mergeType: "MERGE_ALL",
+          },
+        },
+        // Merge "Account Aliases" header across G1:H1
+        {
+          mergeCells: {
+            range: {
+              sheetId: tabSheetId,
+              startRowIndex: 0, endRowIndex: 1,
+              startColumnIndex: ACCOUNTS_SECTION2_START_COL,
+              endColumnIndex: ACCOUNTS_SECTION2_START_COL + ACCOUNTS_SECTION2_COLUMNS.length,
+            },
+            mergeType: "MERGE_ALL",
+          },
+        },
+        // Format row 1 (section headers): bold, centered, blue background
+        {
+          repeatCell: {
+            range: { sheetId: tabSheetId, startRowIndex: 0, endRowIndex: 1 },
+            cell: {
+              userEnteredFormat: {
+                backgroundColor: HEADER_BG_COLOR,
+                textFormat: { foregroundColor: HEADER_FG_COLOR, bold: true, fontSize: 11 },
+                horizontalAlignment: "CENTER",
+              },
+            },
+            fields: "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)",
+          },
+        },
+        // Format row 2 (column sub-headers): bold, lighter blue background
+        {
+          repeatCell: {
+            range: { sheetId: tabSheetId, startRowIndex: 1, endRowIndex: 2 },
+            cell: {
+              userEnteredFormat: {
+                backgroundColor: { red: 0.78, green: 0.85, blue: 0.97 },
+                textFormat: { bold: true },
+              },
+            },
+            fields: "userEnteredFormat(backgroundColor,textFormat)",
+          },
+        },
+        // Freeze first two rows
+        {
+          updateSheetProperties: {
+            properties: { sheetId: tabSheetId, gridProperties: { frozenRowCount: 2 } },
+            fields: "gridProperties.frozenRowCount",
+          },
+        },
+      ],
+    },
+  });
+
+  log("Accounts tab: headers and formatting applied");
+
+  // ── Seed canonical_name from Transactions!account on first run ────────────
+  // Check if any data rows exist (row 3+)
+  const existingData = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: "Accounts!A3:A",
+  });
+  const hasData = (existingData.data.values?.length ?? 0) > 0;
+
+  if (hasData) {
+    log("Accounts tab: data rows already present, skipping seed");
+    return;
+  }
+
+  // Read distinct account values from Transactions tab
+  const txAccountRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: "Transactions!R2:R",  // column R = account
+  });
+  const allAccountValues = txAccountRes.data.values?.flat() ?? [];
+  const distinctAccounts = [...new Set(allAccountValues.filter(Boolean))].sort();
+
+  if (distinctAccounts.length === 0) {
+    log("Accounts tab: no existing transactions found — tab left empty for manual entry");
+    return;
+  }
+
+  // Write one row per distinct account: canonical_name | display_name (blank) | type (blank) | active=TRUE | display_order
+  const seedRows = distinctAccounts.map((name, i) => [
+    name,   // canonical_name
+    "",     // display_name (user fills in)
+    "",     // type (user fills in: depository/credit/etc)
+    true,   // active
+    i + 1,  // display_order
+  ]);
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId,
+    range: "Accounts!A3",
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values: seedRows },
+  });
+
+  log(`Accounts tab: seeded ${seedRows.length} account(s) from Transactions history`);
+}
+
+// ─── Step: Account validation on Transactions tab ────────────────────────────
+
+async function addAccountValidation(
+  sheets: sheets_v4.Sheets,
+  sheetId: string,
+  sheetMeta: sheets_v4.Schema$Sheet[]
+): Promise<void> {
+  const txMeta = findSheet(sheetMeta, "Transactions");
+  if (!txMeta) return;
+
+  const ACCOUNT_COL = TRANSACTIONS_COLUMNS.indexOf("account");
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: sheetId,
+    requestBody: {
+      requests: [
+        {
+          setDataValidation: {
+            range: {
+              sheetId: txMeta.properties?.sheetId!,
+              startRowIndex: 1,
+              startColumnIndex: ACCOUNT_COL,
+              endColumnIndex: ACCOUNT_COL + 1,
+            },
+            rule: {
+              condition: {
+                type: "ONE_OF_RANGE",
+                // Validate against the canonical_name column (A) in Accounts, data rows only (3+)
+                values: [{ userEnteredValue: "=Accounts!$A$3:$A$1000" }],
+              },
+              showCustomUi: true,
+              strict: false, // SHOW_WARNING — flag unrecognized accounts without hard-rejecting
+            },
+          },
+        },
+      ],
+    },
+  });
+  log("Data validation: account dropdown applied to Transactions tab (Accounts!A3:A1000)");
+}
 
 // ─── Step: Additional data validations ───────────────────────────────────────
 //
@@ -1716,6 +1928,11 @@ async function main(): Promise<void> {
     await withRetry("addAdditionalValidations", () => addAdditionalValidations(sheets, sheetId, sheetMeta));
   }
 
+  // 9c. Account validation: Transactions!account validated against Accounts canonical_name list
+  if (needsFormatting) {
+    await withRetry("addAccountValidation", () => addAccountValidation(sheets, sheetId, sheetMeta));
+  }
+
   // 10. Lock BankToSheets-managed tabs
   await withRetry("lockBankToSheetsRaw", () => lockBankToSheetsRaw(sheets, sheetId, sheetMeta));
   await withRetry("lockBalanceHistory", () => lockTab(sheets, sheetId, sheetMeta, "Balance History (BTS)"));
@@ -1729,6 +1946,11 @@ async function main(): Promise<void> {
 
   // 14. Write sheet version
   await withRetry("writeSheetVersion", () => writeSheetVersion(sheets, sheetId));
+
+  // 14b. Set up Accounts tab: headers, formatting, first-run seed from Transactions history
+  // Runs unconditionally (not gated on needsFormatting) because seeding is data-driven and
+  // idempotent — it only writes rows when the tab is empty.
+  await withRetry("setupAccountsTab", () => setupAccountsTab(sheets, sheetId, sheetMeta));
 
   // 15. Sync Groups tab — add any new groups derived from Categories tab (preserves existing settings)
   await withRetry("syncGroupsTab", () => syncGroupsTab(sheets, sheetId, sheetMeta));
