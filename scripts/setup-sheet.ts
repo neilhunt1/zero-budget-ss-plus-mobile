@@ -293,6 +293,16 @@ function findSheet(
 
 // ─── Step: Ensure Tabs Exist ──────────────────────────────────────────────────
 
+// Explicit initial grid sizes for tabs that don't need the default 1000×26.
+// Google Sheets enforces a 10M-cell workbook limit — keeping small tabs small
+// avoids hitting that ceiling when the sheet has many existing tabs.
+const TAB_GRID_SIZES: Record<string, { rowCount: number; columnCount: number }> = {
+  "Accounts":         { rowCount: 500,  columnCount: 9  }, // ~4,500 cells
+  "Groups":           { rowCount: 200,  columnCount: 6  }, // ~1,200 cells
+  "Split Rules":      { rowCount: 500,  columnCount: 11 }, // ~5,500 cells
+  "Budget_Log":       { rowCount: 5000, columnCount: 7  }, // ~35,000 cells
+};
+
 async function ensureTabsExist(
   sheets: sheets_v4.Sheets,
   sheetId: string,
@@ -308,9 +318,17 @@ async function ensureTabsExist(
     return existing;
   }
 
-  const requests: sheets_v4.Schema$Request[] = toCreate.map((title) => ({
-    addSheet: { properties: { title } },
-  }));
+  const requests: sheets_v4.Schema$Request[] = toCreate.map((title) => {
+    const gridProperties = TAB_GRID_SIZES[title];
+    return {
+      addSheet: {
+        properties: {
+          title,
+          ...(gridProperties ? { gridProperties } : {}),
+        },
+      },
+    };
+  });
 
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId: sheetId,
