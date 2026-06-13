@@ -389,6 +389,20 @@ export default function Triage() {
   const advance = () => setIndex((i) => i + 1);
   const goBack = () => setIndex((i) => Math.max(0, i - 1));
 
+  // Must be declared before any early returns so hook call order is stable.
+  const handleDeleteStaleManual = useCallback(async (tx: Transaction) => {
+    if (!token) return;
+    if (!confirm(`Delete "${tx.payee || 'this transaction'}" (${tx.outflow > 0 ? fmt(tx.outflow) : fmt(tx.inflow)})?`)) return;
+    try {
+      await db.transactions.delete(tx.transaction_id);
+      const client = new SheetsClient(SHEET_ID, token);
+      await client.updateValues(`Transactions!A${tx._rowIndex}`, [['']] );
+    } catch (e) {
+      if (e instanceof AuthError) { notifySessionExpired(); return; }
+      setError('Failed to delete — please try again');
+    }
+  }, [token, notifySessionExpired]);
+
   if (rawAllTxns === undefined || rawCategories === undefined) {
     return <div className="screen triage-screen"><div className="state-msg">Loading…</div></div>;
   }
@@ -479,21 +493,6 @@ export default function Triage() {
     setEscapeOpen(false);
     setSelectedCategory('');
   };
-
-  const handleDeleteStaleManual = useCallback(async (tx: Transaction) => {
-    if (!token) return;
-    if (!confirm(`Delete "${tx.payee || 'this transaction'}" (${tx.outflow > 0 ? fmt(tx.outflow) : fmt(tx.inflow)})?`)) return;
-    try {
-      // Remove from IndexedDB optimistically; also clear from sheet
-      await db.transactions.delete(tx.transaction_id);
-      const client = new SheetsClient(SHEET_ID, token);
-      // Clear the row by blanking the transaction_id column — keep row intact to avoid shifting
-      await client.updateValues(`Transactions!A${tx._rowIndex}`, [['']] );
-    } catch (e) {
-      if (e instanceof AuthError) { notifySessionExpired(); return; }
-      setError('Failed to delete — please try again');
-    }
-  }, [token, notifySessionExpired]);
 
   return (
     <div className="screen triage-screen">
