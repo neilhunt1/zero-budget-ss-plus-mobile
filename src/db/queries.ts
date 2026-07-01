@@ -131,6 +131,24 @@ export async function getStaleManualCount(): Promise<number> {
   ).count();
 }
 
+/**
+ * Return the distinct unrecognized account names found in transactions —
+ * i.e. account values that don't appear in the accounts table canonical_name list.
+ * Only checks if the accounts table has been populated; returns [] if it's empty
+ * (accounts tab not yet set up on this sheet).
+ */
+export async function getUnknownAccountNames(): Promise<string[]> {
+  const knownCount = await db.accounts.count();
+  if (knownCount === 0) return [];
+  const knownNames = new Set(
+    (await db.accounts.toArray()).map((a) => a.canonical_name)
+  );
+  const allAccounts = await db.transactions
+    .orderBy('account')
+    .uniqueKeys() as string[];
+  return allAccounts.filter((name) => name && !knownNames.has(name));
+}
+
 export async function getActiveBudgetCategories(): Promise<BudgetCategory[]> {
   const all = await db.budgetCategories.toArray();
   return all.filter((c) => c.active).sort((a, b) => a.sort_order - b.sort_order);

@@ -27,6 +27,8 @@ vi.mock('../../src/db/optimisticWrites', () => ({
 vi.mock('../../src/db/queries', () => ({
   getActiveBudgetCategories: vi.fn().mockResolvedValue([]),
   getSuggestedCategory: vi.fn().mockResolvedValue(null),
+  getStaleManualCount: vi.fn().mockResolvedValue(0),
+  getUnknownAccountNames: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('../../src/api/transactions', async () => {
@@ -56,6 +58,10 @@ vi.mock('../../src/db/schema', () => ({
   db: {
     transactions: {
       toArray: () => Promise.resolve(mockTransactions),
+    },
+    accounts: {
+      count: () => Promise.resolve(0),
+      toArray: () => Promise.resolve([]),
     },
   },
 }));

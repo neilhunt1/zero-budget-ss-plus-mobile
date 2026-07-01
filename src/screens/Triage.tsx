@@ -8,7 +8,7 @@ import {
   findTransferPair,
   findCcPaymentPair,
 } from '../api/transactions';
-import { getActiveBudgetCategories, getSuggestedCategory, getStaleManualCount } from '../db/queries';
+import { getActiveBudgetCategories, getSuggestedCategory, getStaleManualCount, getUnknownAccountNames } from '../db/queries';
 import {
   optimisticApproveIncome,
   optimisticConfirmTransfer,
@@ -314,6 +314,33 @@ function StaleManualBanner({ txns, onDelete }: { txns: Transaction[]; onDelete: 
   );
 }
 
+// ─── Unknown account banner ───────────────────────────────────────────────────
+
+function UnknownAccountBanner({ names }: { names: string[] }) {
+  const [open, setOpen] = useState(false);
+  if (names.length === 0) return null;
+  return (
+    <div className="unknown-account-banner">
+      <button className="unknown-account-banner__toggle" onClick={() => setOpen((o) => !o)}>
+        <span>
+          ⚠️ {names.length} unrecognized account {names.length === 1 ? 'name' : 'names'} in your transactions
+        </span>
+        <span className="stale-manual-banner__chevron">{open ? '▲' : '▾'}</span>
+      </button>
+      {open && (
+        <div className="unknown-account-banner__body">
+          {names.map((name) => (
+            <div key={name} className="unknown-account-banner__name">{name}</div>
+          ))}
+          <p className="unknown-account-banner__hint">
+            Add these to the <strong>Accounts</strong> tab in the spreadsheet to resolve this warning.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TypeSelectCard({ onSelect }: { onSelect: (type: TransactionType) => void }) {
   return (
     <div className="triage-card triage-card--type-select">
@@ -336,6 +363,7 @@ export default function Triage() {
 
   const rawAllTxns = useLiveQuery(() => db.transactions.toArray(), []);
   const rawCategories = useLiveQuery(() => getActiveBudgetCategories(), []);
+  const unknownAccountNames = useLiveQuery(() => getUnknownAccountNames(), []) ?? [];
 
   const allTxns = rawAllTxns ?? [];
   const categories = rawCategories ?? [];
@@ -426,6 +454,7 @@ export default function Triage() {
     return (
       <div className="screen triage-screen">
         <StaleManualBanner txns={staleManual} onDelete={handleDeleteStaleManual} />
+        <UnknownAccountBanner names={unknownAccountNames} />
         <div className="triage-all-caught-up">
           <div className="triage-caught-up-emoji">🎉</div>
           <div className="triage-caught-up-text">All caught up!</div>
@@ -506,6 +535,7 @@ export default function Triage() {
       </header>
 
       <StaleManualBanner txns={staleManual} onDelete={handleDeleteStaleManual} />
+      <UnknownAccountBanner names={unknownAccountNames} />
 
       <div className="triage-card-wrapper">
         {effectiveType === '' && (

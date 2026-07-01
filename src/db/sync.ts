@@ -9,6 +9,7 @@ import {
   fetchReadyToAssign,
 } from '../api/budget';
 import { normalizeBtsTransactions } from '../api/bts';
+import { fetchAccounts } from '../api/accounts';
 import { db } from './schema';
 
 export interface SyncProgress {
@@ -125,6 +126,17 @@ export async function syncOnOpen(
     // Group-level budget assignments (rows with blank category in assignments table)
     const groupAssignments = await fetchAllGroupAssignments(client);
     await db.budgetGroupAssignments.bulkPut(groupAssignments);
+
+    // Accounts and aliases (non-fatal — tab may not exist yet on old sheets)
+    try {
+      const { accounts, aliases } = await fetchAccounts(client);
+      await db.accounts.clear();
+      await db.accounts.bulkPut(accounts);
+      await db.accountAliases.clear();
+      await db.accountAliases.bulkPut(aliases);
+    } catch (e) {
+      console.warn('[sync] Accounts tab fetch failed — skipping (tab may not exist yet):', e);
+    }
 
     const readyToAssign = await fetchReadyToAssign(client);
 
