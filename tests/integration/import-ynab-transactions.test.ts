@@ -2,7 +2,7 @@
  * Integration tests for import-ynab-transactions.ts
  * @integration
  *
- * In CI these run against the test sheet (GOOGLE_SHEET_ID = GOOGLE_SHEET_ID_TEST).
+ * In CI these run against the test sheet (GOOGLE_SHEET_ID = TEST_GOOGLE_SHEET_ID).
  * Locally they run against the dev sheet via .env.development.
  * Requires: GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_SERVICE_ACCOUNT_KEY
  *

@@ -90,26 +90,26 @@ jobs:
         run: npm run setup:test && npm run seed:test
         env:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
-          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID_TEST }}
+          GOOGLE_SHEET_ID: ${{ secrets.TEST_GOOGLE_SHEET_ID }}
 
       - name: Run integration tests
         run: npm run test:integration
         env:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
-          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID_TEST }}
+          GOOGLE_SHEET_ID: ${{ secrets.TEST_GOOGLE_SHEET_ID }}
 
       - name: Build app for E2E
         run: npm run build
         env:
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
-          VITE_GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID_TEST }}
+          VITE_GOOGLE_SHEET_ID: ${{ secrets.TEST_GOOGLE_SHEET_ID }}
           VITE_BASE_PATH: /
 
       - name: Run E2E tests
         run: npm run test:e2e
         env:
           CI: true
-          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID_TEST }}
+          GOOGLE_SHEET_ID: ${{ secrets.TEST_GOOGLE_SHEET_ID }}
           E2E_SERVICE_ACCOUNT_TOKEN: ${{ secrets.E2E_SERVICE_ACCOUNT_TOKEN }}
           # Belt-and-suspenders: auth.ts falls back to this if E2E_SERVICE_ACCOUNT_TOKEN is empty
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
