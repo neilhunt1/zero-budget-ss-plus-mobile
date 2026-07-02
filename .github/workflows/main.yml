@@ -124,7 +124,7 @@ jobs:
           E2E_SERVICE_ACCOUNT_TOKEN: ${{ secrets.E2E_SERVICE_ACCOUNT_TOKEN }}
 
       - name: Upload smoke test report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.3.3
         if: always()
         with:
           name: smoke-report-${{ github.run_number }}
