@@ -26,7 +26,7 @@ jobs:
       - run: npm ci
 
       - name: Run unit tests
-        run: npm test
+        run: npm run test:ci
 
       - name: Upload test results
         uses: dorny/test-reporter@v3
@@ -93,7 +93,7 @@ jobs:
           GOOGLE_SHEET_ID: ${{ secrets.TEST_GOOGLE_SHEET_ID }}
 
       - name: Run integration tests
-        run: npm run test:integration
+        run: npm run test:integration:ci
         env:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
           GOOGLE_SHEET_ID: ${{ secrets.TEST_GOOGLE_SHEET_ID }}
