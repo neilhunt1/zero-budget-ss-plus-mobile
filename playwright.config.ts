@@ -21,7 +21,7 @@ export default defineConfig({
   // (The original retries:2 was masking intermittent failures as "Flaky".)
   retries: process.env.CI ? 1 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: [['html'], ['list']],
+  reporter: process.env.CI ? [['html', { open: 'never', outputFolder: 'playwright-report' }], ['list']] : [['html'], ['list']],
 
   use: {
     baseURL,

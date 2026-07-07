@@ -2,7 +2,7 @@
  * Integration tests for Budget_Calcs tab rollover behavior.
  * @integration
  *
- * In CI these run against the test sheet (GOOGLE_SHEET_ID = GOOGLE_SHEET_ID_TEST).
+ * In CI these run against the test sheet (GOOGLE_SHEET_ID = TEST_GOOGLE_SHEET_ID).
  * Locally they run against the dev sheet via .env.development.
  * Requires: GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_SERVICE_ACCOUNT_KEY
  *
@@ -33,8 +33,8 @@ describeIf('Budget_Calcs rollover @integration', () => {
   let sheetId: string;
 
   beforeAll(async () => {
-    sheetId = process.env.GOOGLE_SHEET_ID ?? '';
-    if (!sheetId) throw new Error('GOOGLE_SHEET_ID is not set');
+    sheetId = process.env.TEST_GOOGLE_SHEET_ID ?? process.env.GOOGLE_SHEET_ID ?? '';
+    if (!sheetId) throw new Error('TEST_GOOGLE_SHEET_ID or GOOGLE_SHEET_ID is not set');
 
     const inlineKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
     const auth = new google.auth.GoogleAuth({
