@@ -625,7 +625,7 @@ async function wipeCutoverWindow(
   if (cutoverDate >= today) {
     await sheets.spreadsheets.values.clear({
       spreadsheetId: sheetId,
-      range: 'Transactions!A2:Z',
+      range: 'Transactions!A2:AA',
     });
     log(`Transactions: wiped all existing rows (cutoverDate=${cutoverDate} ≥ today, no post-cutover rows possible)`);
     return;
@@ -659,7 +659,7 @@ async function wipeCutoverWindow(
   if (survivorIndices.length === 0) {
     await sheets.spreadsheets.values.clear({
       spreadsheetId: sheetId,
-      range: 'Transactions!A2:Z',
+      range: 'Transactions!A2:AA',
     });
     log(`Transactions: wiped ${removedCount} row(s) on or before ${cutoverDate}, no post-cutover rows to preserve`);
     return;
@@ -685,7 +685,7 @@ async function wipeCutoverWindow(
   // Clear and write back only survivors.
   await sheets.spreadsheets.values.clear({
     spreadsheetId: sheetId,
-    range: 'Transactions!A2:Z',
+    range: 'Transactions!A2:AA',
   });
   if (keptRows.length > 0) {
     await sheets.spreadsheets.values.update({

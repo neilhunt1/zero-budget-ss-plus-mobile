@@ -60,8 +60,8 @@ describeIf('import-ynab-transactions @integration', () => {
   const insertedExternalIds: string[] = [];
 
   beforeAll(async () => {
-    sheetId = process.env.GOOGLE_SHEET_ID ?? '';
-    if (!sheetId) throw new Error('GOOGLE_SHEET_ID is not set');
+    sheetId = process.env.TEST_GOOGLE_SHEET_ID ?? process.env.GOOGLE_SHEET_ID ?? '';
+    if (!sheetId) throw new Error('TEST_GOOGLE_SHEET_ID or GOOGLE_SHEET_ID is not set');
 
     const inlineKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
     const auth = new google.auth.GoogleAuth({
@@ -77,17 +77,19 @@ describeIf('import-ynab-transactions @integration', () => {
     // Clean up: delete any rows we inserted during tests
     if (insertedExternalIds.length === 0) return;
 
+    const extIdCol = col('external_id');
+    const extIdLetter = String.fromCharCode('A'.charCodeAt(0) + extIdCol);
+
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
-      range: 'Transactions!A2:Z',
+      range: `Transactions!${extIdLetter}2:${extIdLetter}`,
     });
     const rows = res.data.values ?? [];
-    const extIdCol = col('external_id');
 
     const idSet = new Set(insertedExternalIds);
     const rowIndices: number[] = [];
     for (let i = 0; i < rows.length; i++) {
-      if (idSet.has(rows[i][extIdCol] ?? '')) rowIndices.push(i + 2);
+      if (idSet.has(rows[i][0] ?? '')) rowIndices.push(i + 2);
     }
 
     if (rowIndices.length === 0) return;
@@ -169,7 +171,7 @@ describeIf('import-ynab-transactions @integration', () => {
     // Read back and verify structure
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
-      range: 'Transactions!A2:Z',
+      range: 'Transactions!A2:AA',
     });
     const allRows = res.data.values ?? [];
     const extIdCol = col('external_id');
@@ -222,7 +224,7 @@ describeIf('import-ynab-transactions @integration', () => {
     // Both copies should now exist — afterAll cleans them all up by external_id
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
-      range: 'Transactions!A2:Z',
+      range: 'Transactions!A2:AA',
     });
     const allRows = res.data.values ?? [];
     const extIdCol = col('external_id');
